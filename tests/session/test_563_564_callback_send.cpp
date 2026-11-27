@@ -8258,19 +8258,30 @@ namespace {
 // classes: those whose deadline lies exactly `interval` ahead of the clock when
 // the sleep begins, and all others. With `interval` the session's heartbeat
 // interval and a clock that nobody has advanced since the session last sent and
-// last received a frame, the first class is the liveness loop's sleep. The wait
-// of a graceful close for the peer's Logout is in the second.
+// last received a frame, the first class is the liveness loop's sleep. A third
+// count, read apart from the two, holds the sleeps of the second class whose
+// deadline lies exactly `logout_wait` ahead of the clock when the sleep begins;
+// a zero `logout_wait` counts none. With `logout_wait` the session's
+// logout_disconnect_timeout_ms, different from `interval`, a clock that nobody
+// has advanced since the close sent its Logout, and the close's wait the only
+// sleep of that length in flight (the session's sleeps that can have that length:
+// `git grep -n logout_disconnect_timeout_ms -- src/session`), that count holds
+// the wait of a graceful close for the peer's Logout. The connection bound
+// (106 D3) parks on the session's clock too: its sleep is in the second class and
+// must not be read as that wait.
 class SleepCountingClock final : public fixpp::core::Clock {
 public:
     struct Counts {
         std::size_t interval_begun = 0;
         std::size_t interval_in_flight = 0;
         std::size_t other_in_flight = 0;
+        std::size_t logout_wait_in_flight = 0;
     };
 
     SleepCountingClock(std::shared_ptr<fixpp::core::mock_clock> inner,
-                       std::chrono::milliseconds interval)
-        : inner_{std::move(inner)}, interval_{interval} {}
+                       std::chrono::milliseconds interval,
+                       std::chrono::milliseconds logout_wait = std::chrono::milliseconds::zero())
+        : inner_{std::move(inner)}, interval_{interval}, logout_wait_{logout_wait} {}
 
     // Called when a sleep of the first class begins.
     std::function<void()> on_interval_sleep;
@@ -8290,15 +8301,25 @@ public:
         struct InFlight {
             std::shared_ptr<Counts> counts;
             bool of_interval;
-            InFlight(std::shared_ptr<Counts> c, bool i) : counts{std::move(c)}, of_interval{i} {
+            bool of_logout_wait;
+            InFlight(std::shared_ptr<Counts> c, bool i, bool w)
+                : counts{std::move(c)}, of_interval{i}, of_logout_wait{w} {
                 ++(of_interval ? counts->interval_in_flight : counts->other_in_flight);
+                if (of_logout_wait) ++counts->logout_wait_in_flight;
             }
             InFlight(const InFlight&) = delete;
             InFlight& operator=(const InFlight&) = delete;
-            ~InFlight() { --(of_interval ? counts->interval_in_flight : counts->other_in_flight); }
+            ~InFlight() {
+                --(of_interval ? counts->interval_in_flight : counts->other_in_flight);
+                if (of_logout_wait) --counts->logout_wait_in_flight;
+            }
         };
-        const bool of_interval = deadline - inner_->steady_now() == interval_;
-        const InFlight in_flight{counts_, of_interval};
+        const auto ahead = deadline - inner_->steady_now();
+        const bool of_interval = ahead == interval_;
+        const bool of_logout_wait = !of_interval &&
+                                    logout_wait_ > std::chrono::milliseconds::zero() &&
+                                    ahead == logout_wait_;
+        const InFlight in_flight{counts_, of_interval, of_logout_wait};
         if (of_interval) {
             ++counts_->interval_begun;
             if (on_interval_sleep) on_interval_sleep();
@@ -8311,6 +8332,7 @@ public:
 private:
     std::shared_ptr<fixpp::core::mock_clock> inner_;
     std::chrono::milliseconds interval_;
+    std::chrono::milliseconds logout_wait_;
     std::shared_ptr<Counts> counts_ = std::make_shared<Counts>();
 };
 
@@ -8418,7 +8440,8 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
     }
     // After `f`, so that the gate is released before the fixture joins its pool.
     const FileGate::ReleaseOnExit release_on_exit{gate};
-    const auto clock = std::make_shared<SleepCountingClock>(f.clock, kLifecycleHeartbeat);
+    const auto clock = std::make_shared<SleepCountingClock>(
+        f.clock, kLifecycleHeartbeat, std::chrono::milliseconds{kLogoutWaitMs});
     cfg.clock_override = clock;
     const bool validate_gate = cfg.validate_inbound_messages;
     Session sess{f.engine, cfg};
@@ -8542,7 +8565,7 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             "CallbackSend::lifecycle_control");
     } else if (completed) {
         // A graceful close the callback started may wait for a peer Logout; it is
-        // in that wait once a sleep that is not the liveness loop's is in flight.
+        // in that wait once a sleep of the logout wait's length is in flight.
         // An arm whose test body starts the graceful close does not advance the
         // clock. There the terminal close the callback starts must bring the end:
         // started in onLogout it ends the wait, and started in the Logout's toAdmin
@@ -8551,10 +8574,10 @@ void run_lifecycle_callback_starts_close(LifecycleArm arm, session_role role, cl
             completed = f.end_logout_wait_when(
                 [&] {
                     return cell.started.done ||
-                           (cell.outer.done && clock->counts().other_in_flight > 0);
+                           (cell.outer.done && clock->counts().logout_wait_in_flight > 0);
                 },
                 [&] {
-                    return pending() + (clock->counts().other_in_flight > 0
+                    return pending() + (clock->counts().logout_wait_in_flight > 0
                                             ? ""
                                             : "no close was in its wait for the peer's Logout");
                 },
