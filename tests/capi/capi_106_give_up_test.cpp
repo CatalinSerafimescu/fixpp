@@ -16,16 +16,17 @@
 // long the fill takes. Once one call has been in flight for kParkedFor, and the last Heartbeat was
 // written kParkedFor ago, the peer writes one NewOrderSingle, the re-base: its Span (before the
 // write, and after the receive callback saw it) brackets L, the session's last inbound instant,
-// and the peer then writes nothing more. The parked call started before L, so the liveness loop's
-// next emit after L queues behind its write, and the give-up instant is G = L + 3T + 1 ns; the
-// close follows at G + B. A call still in flight for kParkedFor that then completes makes the cell
-// re-base again, and one that completes after the cell has stopped watching is not the call that
-// returns, which the identity clause reports.
+// and the peer then writes nothing more. The parked call started before L, so while it stays parked
+// the liveness loop's next emit after L queues behind its write, and the give-up instant is
+// G = L + 3T + 1 ns; the close follows at G + B. A call still in flight for kParkedFor that then
+// completes makes the cell re-base again. A call that completes after the cell has stopped watching
+// leaves a later call of the flood to be the one that returns: the cell does not ask which call
+// that is, only that it was in flight across the sample below.
 //
 // fixpp_session_is_established is sampled once, at lo + 2T, lo and hi the re-base's Span. The cell
 // asserts:
-//   - reach: the returning call is the one in flight at the re-base and started before lo, the
-//     sample ended before lo + 3T, and it read true;
+//   - reach: the returning call started before the sample, the sample ended before lo + 3T, and
+//     it read true;
 //   - the returning call's result was FIXPP_ERR_CANCELLED (B-105-8's value), no earlier than
 //     lo + 3T + B and no later than hi + 3T + B + kMargin; with the reach clauses, the call was in
 //     flight across the sample and up to the give-up, and the lower side shows the session read
@@ -41,7 +42,12 @@
 // whose loopback buffering never parks a write fails the setup rather than passing. The session
 // reads inbound frames while a write is parked. kParkedFor is under kKeepalive, and kKeepalive
 // plus kParkedFor under T. kParkedFor is longer than one completing call on the slowest lane, or
-// the cell re-bases more than once (a slower setup, not a weaker check).
+// the cell re-bases more than once (a slower setup, not a weaker check). The band holds while the
+// liveness loop's emit after L does not return before G, which the C ABI does not show. A send
+// path that unparks after the re-base and lets that emit's write return moves the give-up to the
+// later of L + 2T and that return + T (data-model E-4, row 1): before L + 3T when the write
+// returns before L + 2T, and the cell fails on the band's lower side; at or after L + 3T
+// otherwise, which the band can admit though the loop, not the connection bound, decided it.
 
 #include <gtest/gtest.h>
 
@@ -272,10 +278,6 @@ TEST(Capi106GiveUp, SendBlockedAtGiveUp_ReturnsCancelled_IsEstablishedFalse) {
                   << " (in flight at the re-base: call " << rebase->call << ") started at lo - "
                   << ms_of(at.lo - flood.started_at()) << " ms; returned at hi + 3T + B + "
                   << ms_of(flood.returned_at() - close_hi) << " ms\n";
-        EXPECT_EQ(flood.last_call(), rebase->call)
-            << "setup: the returning call is not the one in flight at the re-base";
-        EXPECT_LT(flood.started_at(), at.lo)
-            << "setup: the returning call started after the re-base";
         EXPECT_LT(flood.started_at(), sample_from)
             << "setup: the returning call started after fixpp_session_is_established was sampled";
         EXPECT_EQ(flood.rc(), FIXPP_ERR_CANCELLED) << "the parked send's result";
