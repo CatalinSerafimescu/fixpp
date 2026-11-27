@@ -84,8 +84,8 @@ TEST(WireUnknownFields, DocumentOrderInterleavedWithKnownFields) {
     for (auto const& kv : mv->unknown_fields()) {
         auto const* const lo = buf.data();
         auto const* const hi = buf.data() + buf.size();
-        EXPECT_TRUE(kv.data >= lo && kv.data + kv.len <= hi) << "tag " << kv.tag
-                                                             << " does not alias the frame";
+        EXPECT_TRUE(kv.data >= lo && kv.data + kv.len <= hi)
+            << "tag " << kv.tag << " does not alias the frame";
     }
 }
 

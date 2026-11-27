@@ -99,7 +99,7 @@ static_assert(!std::is_trivially_copyable_v<detail::snapshot_key>,
 // exclusivity-self-test: comment out
 static_assert(!w1_pins::bit_castable<detail::snapshot_key>,
               "std::bit_cast can make the passkey outside make_dictionary_snapshot");
-#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+#ifdef FIXPP_TEST_IMPLICIT_LIFETIME
 static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(int), "the trait's known positive");
 static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_passkey),
               "the base shape is implicit-lifetime, so the pin below can fail");
@@ -119,7 +119,7 @@ TEST(DictionarySnapshotPasskeyShape, ImplicitLifetimePinIsEvaluatedOnThisLane) {
         GTEST_SKIP() << "no implicit-lifetime trait on " << il::kCompiler
                      << ": A6's implicit-lifetime pin is left out on this lane";
     }
-#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+#ifdef FIXPP_TEST_IMPLICIT_LIFETIME
     EXPECT_TRUE(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_passkey));
 #endif
 }

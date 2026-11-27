@@ -41,8 +41,8 @@ Dictionary load_real_dict(char const* file, std::pmr::memory_resource* mr) {
 }
 
 std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view body) {
-    std::string pre = "8=" + std::string{begin_string} + "\x01" + "9=" +
-                      std::to_string(body.size()) + "\x01" + std::string{body};
+    std::string pre = "8=" + std::string{begin_string} + "\x01" +
+                      "9=" + std::to_string(body.size()) + "\x01" + std::string{body};
     unsigned sum = 0;
     for (unsigned char const c : pre) sum += c;
     sum %= 256U;

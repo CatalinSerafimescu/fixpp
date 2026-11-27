@@ -37,11 +37,11 @@ static_assert(bit_castable<int>, "bit_castable's known positive");
 
 }  // namespace
 
-// ── fixpp#559 site 1 (D-559-1): Writer is built from its destination alone ──────────────────
+// ── fixpp#559 (D-559-1): Writer is built from its destination alone ─────────────────────────
 // The Writer keeps no group bookkeeping, so it takes no scratch resource.
-static_assert(!std::is_constructible_v<fixpp::wire::Writer, std::span<std::byte>,
-                                       std::pmr::memory_resource*>,
-              "Writer still takes a scratch memory resource");
+static_assert(
+    !std::is_constructible_v<fixpp::wire::Writer, std::span<std::byte>, std::pmr::memory_resource*>,
+    "Writer still takes a scratch memory resource");
 static_assert(std::is_nothrow_constructible_v<fixpp::wire::Writer, std::span<std::byte>>,
               "Writer(dst) is the constructor, and it does not throw");
 
@@ -68,7 +68,7 @@ static_assert(!std::is_copy_constructible_v<fixpp::wire::group_writer_token>,
               "group_writer_token is copy-constructible outside Writer");
 static_assert(!bit_castable<fixpp::wire::group_writer_token>,
               "std::bit_cast can make a group_writer_token outside Writer");
-#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+#ifdef FIXPP_TEST_IMPLICIT_LIFETIME
 static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(int), "the trait's known positive");
 static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_key) &&
                   std::is_copy_constructible_v<w1_pins::base_shape_key>,
@@ -88,7 +88,7 @@ TEST(WireTypeShapePins, GroupWriterTokenImplicitLifetimePinIsEvaluatedOnThisLane
         GTEST_SKIP() << "no implicit-lifetime trait on " << il::kCompiler
                      << ": the implicit-lifetime pins are left out on this lane";
     }
-#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+#ifdef FIXPP_TEST_IMPLICIT_LIFETIME
     EXPECT_TRUE(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_key));
     EXPECT_FALSE(FIXPP_TEST_IMPLICIT_LIFETIME(fixpp::wire::group_writer_token) &&
                  std::is_copy_constructible_v<fixpp::wire::group_writer_token>);
@@ -100,9 +100,10 @@ TEST(WireTypeShapePins, GroupWriterTokenImplicitLifetimePinIsEvaluatedOnThisLane
 // ── fixpp#688 (D-688-1): the unknown-field view and its iterator ────────────────────────────
 // operator* returns kv by value: the iterator holds its scan state, not a kv, so a reference
 // into it would dangle across ++.
-static_assert(std::same_as<decltype(*std::declval<fixpp::wire::unknown_fields_view::iterator const&>()),
-                           fixpp::wire::unknown_fields_view::kv>,
-              "operator* returns kv by value");
+static_assert(
+    std::same_as<decltype(*std::declval<fixpp::wire::unknown_fields_view::iterator const&>()),
+                 fixpp::wire::unknown_fields_view::kv>,
+    "operator* returns kv by value");
 // The view is built by MessageView::unknown_fields() alone: the span and pointer constructors of
 // the materialised list are gone.
 static_assert(!std::is_constructible_v<fixpp::wire::unknown_fields_view,

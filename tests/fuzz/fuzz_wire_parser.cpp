@@ -99,8 +99,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 7): a few common tags,
         // which add_valid_tag marks defined, so both sides of the unknown-field predicate fire
         // on ordinary frames, not only on a frame that carries a group tag.
-        tvb.add_valid_tag("D", 34).add_valid_tag("D", 35).add_valid_tag("D", 49).add_valid_tag(
-            "D", 55);
+        tvb.add_valid_tag("D", 34).add_valid_tag("D", 35).add_valid_tag("D", 49).add_valid_tag("D",
+                                                                                               55);
         return std::move(tvb).build();
     }();
     Parser<access_mode::Index> p{tv};

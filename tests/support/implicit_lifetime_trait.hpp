@@ -8,7 +8,7 @@
 // is false. FIXPP_TEST_IMPLICIT_LIFETIME(T) is defined only where clang's
 // __builtin_is_implicit_lifetime or the library's std::is_implicit_lifetime_v exists, and
 // implicit_lifetime::kHasTrait says which. A pin written inside
-// `#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)` is left out elsewhere; each TU that includes this
+// `#ifdef FIXPP_TEST_IMPLICIT_LIFETIME` is left out elsewhere; each TU that includes this
 // header has a runtime cell that skips, naming the compiler, where kHasTrait is false, so which
 // lanes evaluated the pins is read from the test log, not from the build.
 //
@@ -33,7 +33,7 @@
 
 namespace fixpp::test_support::implicit_lifetime {
 
-#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+#ifdef FIXPP_TEST_IMPLICIT_LIFETIME
 inline constexpr bool kHasTrait = true;
 #else
 inline constexpr bool kHasTrait = false;

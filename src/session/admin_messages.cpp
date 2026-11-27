@@ -27,7 +27,7 @@
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
-#include <fixpp/dict/version_profile.hpp>     // render_appl_ver_id — T016/033
+#include <fixpp/dict/version_profile.hpp>  // render_appl_ver_id — T016/033
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/seqnum.hpp>
 // 070-fix44-closeout S-037: the build_logon body iterates opts.supported_msg_types

@@ -62,7 +62,7 @@ private:
         std::byte const* base = nullptr;
         dict_hooks::classify_fn_t classify = nullptr;
         void const* dict = nullptr;
-        std::string_view msg_type{};
+        std::string_view msg_type;
     };
 
     // The first entry at or after `p` that is unknown, or `s.end`.
