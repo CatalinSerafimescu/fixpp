@@ -215,9 +215,19 @@ main() {
     # factory's. Scope excludes `tests/`: a test may NAME the key without minting
     # one (A5 does exactly that). `snapshot_key() = default;` is a DECLARATION,
     # not a construction, and is filtered.
+    # W1 (`.specify/688-707-559-wire-headroom-token.md` D-707-2): the key's default
+    # constructor is user-provided, so its declaration in $HDR is the mint pattern
+    # followed by `noexcept {}` (G1_HDR_DECL below matches the whole line). That one
+    # line, in $HDR only, is a DECLARATION too and is filtered; a second line of that
+    # form, or any other match in $HDR, still counts. The self-test seeds an extra
+    # mint in $HDR and one in $FACTORY and requires each to fail.
     G1_MINT='snapshot_key[[:space:]]*(\{[[:space:]]*\}|\([[:space:]]*\))'
+    G1_HDR_DECL='^[^:]*:[0-9]+:[[:space:]]*snapshot_key[(][)][[:space:]]+noexcept[[:space:]]*[{][}][[:space:]]*$'
     g1_mint_raw=$(grep -rnE "$G1_MINT" src/ include/ bindings/ tools/ || true)
     g1_mint=$(printf '%s\n' "$g1_mint_raw" | { grep -vE '=[[:space:]]*default' || true; })
+    g1_mint=$(printf '%s\n' "$g1_mint" | awk -v f="$HDR:" -v re="$G1_HDR_DECL" '
+        !done && index($0, f) == 1 && $0 ~ re { done = 1; next }
+        { print }')
     g1_mint_n=$(n_of "$g1_mint")
     echo "G1 production key constructions = $g1_mint_n"
     [ "$g1_mint_n" -eq 1 ] || { echo "G1 FAIL: $g1_mint_n production snapshot_key construction(s), expected exactly 1:"; echo "$g1_mint"; exit 1; }

@@ -8,6 +8,9 @@
 // table alive but neither the snapshot nor its Dictionary. 215's alias design
 // (§3's helper, §5b's "third owner of the snapshot's control block", §6 seam 7's
 // G2 count of one) is history; the pairing and the passkey below are unchanged.
+// ⚠️ The passkey's SHAPE is superseded by W1 (`.specify/688-707-559-wire-headroom-token.md`
+// D-707-2, fixpp#707): its constructors are user-provided (below); its role, its sole minter and
+// the pairing are unchanged.
 //
 // fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md` §3) —
 // `fixpp::dict::dictionary_snapshot`: an opaque, non-copyable, non-movable
@@ -61,10 +64,22 @@ namespace detail {
 // needs) while leaving it callable by exactly one function (what closes
 // C1). The friend list below IS the boundary — /speckit-verify Step 1's G1
 // census pins that it stays a list of one.
+// W1 D-707-2: both constructors are user-provided, so the key is neither trivially copyable
+// (std::bit_cast cannot make one) nor an implicit-lifetime type (no object of it can be created
+// implicitly, which the public copy constructor could then pass). The copy constructor is public
+// because std::make_shared copies the key outside the friend. Re-derive with A5 and A6 in
+// tests/dictionary/dictionary_snapshot_test.cpp.
 class snapshot_key {
-    snapshot_key() = default;
+    // A defaulted default constructor is trivial, so the key would be implicit-lifetime again.
+    // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+    snapshot_key() noexcept {}
     friend std::shared_ptr<const dictionary_snapshot> fixpp::dict::make_dictionary_snapshot(
         std::shared_ptr<const Dictionary>);
+
+public:
+    // A defaulted copy constructor is trivial, so the key would be bit_cast-able again.
+    // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+    snapshot_key(snapshot_key const& /*other*/) noexcept {}
 };
 }  // namespace detail
 

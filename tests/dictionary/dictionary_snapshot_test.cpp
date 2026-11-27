@@ -25,12 +25,16 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <bit>
 #include <concepts>
+#include <cstddef>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/dictionary_snapshot.hpp>
 #include <memory>
 #include <type_traits>
 
+#include "support/implicit_lifetime_trait.hpp"
 #include "support/validation_test_dictionary.hpp"
 
 using namespace fixpp::dict;
@@ -63,9 +67,62 @@ static_assert(std::same_as<
 // key. Access checking in is_*_constructible is performed as if in an
 // unrelated context, so this goes RED exactly when the key is opened (moving
 // detail::snapshot_key's ctor to `public:`) — the mutation A1-A4 cannot see.
+// exclusivity-self-test: comment out
 static_assert(!std::is_default_constructible_v<detail::snapshot_key>);
 
+// A6 — W1 (`.specify/688-707-559-wire-headroom-token.md` D-707-2, fixpp#707): the key cannot be
+// forged. Its copy constructor is user-provided and public (std::make_shared copies the key
+// outside the friend), so it is not trivially copyable, which std::bit_cast needs. Its default
+// constructor is user-provided and private, so it is not an implicit-lifetime type either: an
+// implicitly created key would be an lvalue, which the public copy constructor could pass.
+// bit_castable is a template, so a type std::bit_cast rejects makes it false rather than a hard
+// error. Every block below that names the key carries the marker the exclusivity gate's
+// self-test comments out by; a block without it keeps the key named in code, and the self-test's
+// RED cases then fail.
+namespace w1_pins {
+template <class T>
+concept bit_castable = requires { std::bit_cast<T>(std::array<std::byte, sizeof(T)>{}); };
+class base_shape_friend;
+// The base shape of the key (a defaulted private default constructor, an implicit copy): the
+// same-shape known positive.
+class base_shape_passkey {
+    base_shape_passkey() = default;
+    friend class base_shape_friend;
+};
+}  // namespace w1_pins
+static_assert(w1_pins::bit_castable<int>, "bit_castable's known positive");
+static_assert(w1_pins::bit_castable<w1_pins::base_shape_passkey>,
+              "the base shape is bit_cast-able, so bit_castable can say yes for this shape");
+// exclusivity-self-test: comment out
+static_assert(!std::is_trivially_copyable_v<detail::snapshot_key>,
+              "the passkey is trivially copyable, so std::bit_cast can forge one");
+// exclusivity-self-test: comment out
+static_assert(!w1_pins::bit_castable<detail::snapshot_key>,
+              "std::bit_cast can make the passkey outside make_dictionary_snapshot");
+#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(int), "the trait's known positive");
+static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_passkey),
+              "the base shape is implicit-lifetime, so the pin below can fail");
+// exclusivity-self-test: comment out
+static_assert(!FIXPP_TEST_IMPLICIT_LIFETIME(detail::snapshot_key),
+              "the passkey is implicit-lifetime, and its copy constructor is public");
+#endif
+
 namespace {
+
+// Where the compiler offers no implicit-lifetime query, A6's implicit-lifetime pin is left out
+// (a mutant that defaults the passkey's default constructor then survives there); this cell then
+// skips and names the compiler, so the test log lists the lanes that evaluated it.
+TEST(DictionarySnapshotPasskeyShape, ImplicitLifetimePinIsEvaluatedOnThisLane) {
+    namespace il = fixpp::test_support::implicit_lifetime;
+    if (!il::kHasTrait) {
+        GTEST_SKIP() << "no implicit-lifetime trait on " << il::kCompiler
+                     << ": A6's implicit-lifetime pin is left out on this lane";
+    }
+#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+    EXPECT_TRUE(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_passkey));
+#endif
+}
 
 // ── make_dictionary_snapshot: basic contract ─────────────────────────────────
 
