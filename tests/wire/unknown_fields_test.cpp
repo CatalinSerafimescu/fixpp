@@ -194,8 +194,8 @@ TEST(WireUnknownFields, ReadingTheUnknownFieldsDrawsNothingFromTheParseResource)
 }
 
 // [PR68-02] Contract API: unknown_fields() uses the dict passed to Parser at
-// construction time — no caller-supplied argument. Tag 5000 is not registered
-// for "D", so it must appear as unknown; known fields (35, 34) and framing
+// construction time — no caller-supplied argument. The dict defines no tag 5000,
+// so it must appear as unknown; known fields (35, 34) and framing
 // tags (8, 9, 10) must NOT appear. ([2b §4.3] / [2b §4.8])
 TEST(WireUnknownFields, DictBoundUnknownSplit) {
     // Build a dict that knows 35 (MsgType) and 34 (MsgSeqNum) for "D".
@@ -221,7 +221,7 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
     // unknown_fields() — contract API, no arg — walks the offset table and
     // classifies against the dict stored at Parser construction time.
     auto uf = mv->unknown_fields();
-    // tag 5000 is not in the dict for "D" → must appear as unknown.
+    // the dict defines no tag 5000 → must appear as unknown.
     EXPECT_FALSE(uf.empty()) << "tag 5000 must be classified as unknown";
     std::vector<std::uint16_t> unknown_tags;
     for (auto it = uf.begin(); !(it == uf.end()); ++it) {
@@ -365,8 +365,8 @@ std::size_t smallest_parse_only_block(fixpp::wire::frame_view const& fv) {
 
 }  // namespace q32
 
-// Positive control: over a block large enough for the list, the same frame yields
-// every unknown field, so an empty view in the cell below is the exhaustion's.
+// Positive control: over a block large enough for anything, the same frame yields every unknown
+// field, the count the cell below requires over the smallest block.
 TEST(WireUnknownFieldsQ32, ControlTheListFitsAndHoldsEveryUnknownField) {
     auto buf = q32::frame_with_unknown_fields();
     auto fv = fixpp::wire::test::make_frame_view(buf);
