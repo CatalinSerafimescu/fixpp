@@ -1,15 +1,19 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.2, issue-mode design note, 2026-11-27. Gate A round 1 applied; round 2 review
-> pending.** No code and no test is written yet. Branch `wire-688-707-559-headroom-token`, cut from
-> `origin/main` at `b93b8a28`. What round 1 changed, and what it declined, is in "Gate A".
+> **Status: v0.3, issue-mode design note, 2026-11-27. Gate A round 2 applied (round 1 before it);
+> round 2 review pending.** No code and no test is written yet. Branch
+> `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
+> and what it declined, is in "Gate A".
 >
 > **Rulings this note applies** (owner, 2026-11-27): the official FIX documents decide first; then
 > QuickFIX's behaviour where copying it has no downside, with QuickFIX C++ as the drop-in target;
 > correctness before everything else; every deviation is recorded in the B&L. Under the owner's
 > delegation of 2026-11-27 the orchestrator ruled R-W1-1 to R-W1-4, each flagged for the owner's review
 > at merge (§7; the rulings record is `decisions/speckit/pr-w1-688-707-559-owner-rulings.md` in the
-> parent).
+> parent). **R-W1-4 applies as amended twice:** the note names the shapes expected to regress and how
+> they are measured, and accepts nothing in advance. An over-band row is decided after the
+> measurement, posted in the PR thread with its figures, and the owner's ratification there is a merge
+> condition (§1.4, §7).
 >
 > *Read* means read from source at `b93b8a28`; *run* names a command or a compile a reader can
 > repeat. The probes are inlined in §A so Gate A can re-run them. Claims about code name a function,
@@ -155,11 +159,40 @@ in 093's bundle as history.
   - The hazard is not new (a view whose dictionary has gone already dangles at today's first call),
     but its window grows from the first call to the last iteration. `unknown_fields()`'s comment and
     `B-688-1` state the condition.
-- **The iterator holds the same context by value**, so `auto it = mv.unknown_fields().begin();` does
-  not dangle on the temporary view. That matches today, where the iterator points into the
-  `MessageView`'s vector. `operator*` returns `kv` **by value**.
-  - Rejected: keeping `kv const&` by storing a `kv` in the iterator. That reference dangles across
-    `++`, a hazard today's iterator does not have.
+- **The iterator contract** (a public C++ change; the probes are §A.4):
+  - **The iterator holds the same context by value**, so `auto it = mv.unknown_fields().begin();` does
+    not dangle at runtime on the temporary view: it stays valid while the `MessageView`'s parse
+    storage lives. At runtime that matches today, where the iterator points into the `MessageView`'s
+    vector. It does not match today at compile time on clang (next bullet).
+  - **`operator*` returns `kv` by value.** Rejected: keeping `kv const&` by storing a `kv` in the
+    iterator. That reference dangles across `++`, a hazard today's iterator does not have. **Pinned**
+    by `static_assert(std::same_as<decltype(*std::declval<unknown_fields_view::iterator const&>()),
+    unknown_fields_view::kv>)`, in the grouped wire bucket. It is RED on the base, which returns
+    `kv const&`, on clang and gcc (§A.4). The iterator-cached-reference mutant (§1.6 item 6) is the
+    design it kills, and no behavioural cell can: range-`for` reads each element before `++`, and
+    the storage stays alive, so ASan has nothing to report.
+  - **`begin()` and `end()` drop `[[clang::lifetimebound]]`.** Today both carry it on the view.
+    After D-688-1 the iterator no longer points into the view, so the attribute's claim becomes false,
+    and keeping it makes clang reject the idiom the design makes valid: `auto it =
+    mv.unknown_fields().begin();` is "temporary whose address is used as value of local variable
+    'it' will be destroyed at the end of the full-expression [-Werror,-Wdangling]" (`-Wdangling` is
+    on by default). The hidden `_base` preset in `CMakePresets.json` sets `FIXPP_WERROR` to `ON`,
+    `fixpp_apply_werror_to_all_targets` (`cmake/Helpers.cmake`) applies `-Werror` to every target
+    that does not set `FIXPP_WERROR_EXEMPT`, and `git grep -n FIXPP_WERROR_EXEMPT -- tests` finds
+    only negative-compile probes, none in `tests/wire`. So with the attribute kept, item 5's
+    temporary-view cell could not build on any clang lane.
+    - **Kept:** `unknown_fields()`'s own `[[clang::lifetimebound]]`. `auto v =
+      make_mv().unknown_fields();` over a temporary `MessageView` is still diagnosed (§A.4).
+    - **The cost:** clang no longer diagnoses the chain through `begin()` from a temporary
+      `MessageView`, as in `auto it = parser.parse(f, &mr)->unknown_fields().begin();`, which does
+      dangle. `B-688-1` says so.
+    - **Rejected:** keeping the attribute and wrapping item 5's cell in a local
+      `#pragma clang diagnostic ignored "-Wdangling"`. That makes every consumer who writes the valid
+      idiom suppress a diagnostic the header itself makes false, to keep a diagnosis that the
+      attribute gives only incidentally (it fires on the view temporary, valid or not).
+    - gcc ignores the attribute (`-Wno-attributes=clang::lifetimebound`, `cmake/Helpers.cmake`) and
+      warns on neither shape.
+  - **What stops compiling** is listed in §1.5 and `B-688-1`.
 - **The predicate is the dictionary-wide `table_view::tag_defined(tag)` (R-W1-3).** The classify
   lambda of `dict_hooks::for_table_view` returns `tag_defined(t)` in place of `field_valid_for(mt, t)`.
   Framing tags 8, 9 and 10 stay exempt, and the document order does not change. **The yielded set
@@ -189,13 +222,18 @@ in 093's bundle as history.
     to save the view's copy of `msg_type`. So the view and its iterator still carry `msg_type`.
 - **The first unknown entry is found when the view is built**, so `begin()` and `empty()` are O(1)
   after construction. `View`'s base keeps its meaning: the bytes of the first unknown field's value, or
-  none. Re-derive that nothing reads it today:
-  `git grep -n -E 'unknown_fields\(\)\.(bytes|size)|uf\.(bytes|size)' -- src include tests`.
+  none. The condition is that `View`'s base is not part of `unknown_fields_view`'s contract and no
+  test asserts it. A name-based recipe can only support it:
+  `git grep -n -E 'unknown_fields\(\)\.(bytes|size)|\buf\.(bytes|size)' -- src include tests`
+  prints nothing. Without the `\b`, `uf\.` matches every `buf.size()` in the tree. The `\b` is
+  honoured: its known positive, `git grep -n -E '\bbuf\.size' -- src`, prints hits. A view bound to
+  any other name escapes the recipe.
 - **`unk_items_` and `unk_items_built_` are deleted from `MessageView`.** `unk_items_` is declared in
   both modes, so both `MessageView<Index>` and `MessageView<Iter>` shrink. With it goes the MSVC-debug
   hazard of constructing a `pmr::vector` over a null resource, which the member's comment explains.
 - **`unknown_fields()` keeps `noexcept`, `[[nodiscard]]`, `[[clang::lifetimebound]]` and its
   `requires(Mode == access_mode::Index)`.** It no longer has a `try`, because nothing in it can throw.
+  `begin()` and `end()` lose their `[[clang::lifetimebound]]` (the iterator contract above).
 - **Side effect, stated as a property.** `unknown_fields()` no longer writes any member, so the
   `mutable` state it shared across `const` calls is gone. Threads calling it on one const view no
   longer write shared state. This note claims nothing wider about sharing a `MessageView` across
@@ -209,12 +247,14 @@ in 093's bundle as history.
 - Today the first call classifies every entry once and stores the result; later calls are O(1).
 - After D-688-1, building the view scans as far as the first unknown entry, and every full iteration
   classifies each remaining entry again. A frame with no unknown fields is scanned whole on each call.
-- **The cost of one classification falls.**
-  - `tag_defined` is a binary search of the sorted `defined_tags_`, with no `msg_type` lookup.
-  - `field_valid_for` hashes `msg_type` and then probes a set, once for each entry it classifies. The
-    validator hoists that hash for the same reason (the "Hot-path hoist" comment on
+- **What one classification does changes; whether it gets cheaper is measured, not claimed.**
+  - `field_valid_for` hashes `msg_type` into `valid_` and then probes that MsgType's set, once for
+    each entry it classifies. The validator hoists that hash (the "Hot-path hoist" comment on
     `table_view::valid_tags_for`).
-  - The evidence file states the per-entry cost it measures.
+  - `tag_defined` drops the `msg_type` lookup and binary-searches the sorted `defined_tags_`, every
+    tag the dictionary defines.
+  - A hash probe against a logarithmic search is an empirical question. The evidence file states the
+    per-entry cost the bench measures, and that figure is the conclusion.
 - `unknown_fields()` is not on the session's dispatch path (no caller in `src/`), so the cost falls on
   an application that asks.
 - No bench covers it today (`git grep -n unknown_fields -- bench`). The PR adds `bench/wire` cases for
@@ -234,13 +274,22 @@ in 093's bundle as history.
   binds `auto const&`, and all of these compile on both trees. So the PR's bench source is copied into
   a base worktree and both trees run A-B-A-B (min per tree), locally. The evidence file records the
   command and the numbers. The rows both trees share stay CI's paired comparison, as usual.
-- **What a slowdown needs (R-W1-4).** The arms for repeated calls and for `empty()` on a frame with no
-  unknown fields are expected to run slower than the base, by design.
-  - R-W1-4 is a `[const §VIII.2]` ruling under the owner's delegation, flagged for the owner's review
-    at merge. It accepts that cost if the paired numbers show the cost is limited to those cold shapes.
-  - Any regression past `[const §VIII.2]`'s band on the per-message dispatch path blocks the merge and
-    goes to the owner. That path is the paired CI rows.
-  - The single-pass arm is reported beside the slow arms, so the report shows both sides.
+- **What a slowdown needs (R-W1-4 as amended twice).** Nothing is accepted in advance.
+  - **The shapes expected to regress:** repeated `unknown_fields()` calls and repeated iteration of
+    one view, and `unknown_fields().empty()` on a frame with no unknown fields. The single-pass arm is
+    reported beside them, so the report shows both sides.
+  - **How they are measured:** the transplanted A-B-A-B run above, min per tree, with its command and
+    figures in the evidence file.
+  - **The rule.** Each row past `[const §VIII.2]`'s band is decided after the measurement, with its
+    figures. `[const §VIII.2]`'s "An accepted regression is never author-declared" paragraph requires
+    approval by someone other than the change's author, recorded in the PR thread. So each over-band
+    row is posted in the PR thread with its figures and the orchestrator's recommendation, and the
+    owner's ratification there is a **merge condition**, the form 106's Gate B gave R20
+    (`decisions/speckit/106-logon-guards-write-bounds-gateb.md` in the parent, "the R20 owner flag").
+    The delegation's "merge if green" does not cover an over-band row. If no row is over the band, no
+    approval is needed.
+  - **An extra hard rule:** a regression past the band on the per-message dispatch path, which is
+    CI's paired rows, blocks the merge and goes to the owner.
 
 ### 1.5 API, C ABI and layout
 
@@ -251,10 +300,20 @@ in 093's bundle as history.
   (`SessionConfig::dialect_overlay`) and `B-652-1` (`redact_tag554`). Article IV §1 makes C++ the
   primary surface but states no compatibility promise for it. The three places:
   - the `unknown_fields_view` constructor from a `kv` span is removed;
-  - `iterator::operator*` returns `kv` by value. Code that binds `kv const&` or `auto const&` keeps
-    compiling, through lifetime extension. Code that takes `&*it`, or keeps a reference across `++`,
-    does not. Re-derive the in-repo uses with
-    `git grep -n -E 'unknown_fields\(\)|unknown_fields_view' -- tests src include bench bindings`;
+  - the iterator (§1.4, the iterator contract):
+    - `operator*` returns `kv` by value. Code that binds `kv const&` or `auto const&` keeps
+      compiling, through lifetime extension.
+    - Code that stops compiling or stops being valid: `for (auto& x : mv.unknown_fields())`
+      (a non-const lvalue reference cannot bind the prvalue, on clang and gcc, §A.4); `&*it`; a
+      reference held across `++`; and the iterator's public `explicit iterator(kv const*)`
+      constructor, which goes with the span constructor.
+    - `begin()` and `end()` lose `[[clang::lifetimebound]]`, which changes what clang diagnoses,
+      not what compiles.
+    - Re-derive the in-repo uses with
+      `git grep -n -E 'unknown_fields\(\)|unknown_fields_view' -- tests src include bench bindings`;
+      for the iterator's constructor,
+      `git grep -n -E 'unknown_fields_view::iterator|iterator\{' -- tests src include bench bindings`
+      and keep the hits that mention `unknown`: only the header's own `begin()` and `end()`;
   - `sizeof(unknown_fields_view)` grows, and `sizeof(MessageView<…>)` shrinks in both modes.
 - **Layout: rebuild required.** `MessageView` is built by the library (the session's parse path) and
   read inline by application code, so mixing objects built against the old and the new header is an ODR
@@ -321,18 +380,36 @@ in 093's bundle as history.
    - `DictBoundUnknownSplit` and `EmptyDictAllTagsUnknown` stay green. A hand-built table defines every
      tag it is told anything about (the comment on `table_view::mark_defined`), so 35 and 34 are
      defined and 5000 is not.
-4. **Zero allocation.**
-   - The wire cell iterates over a counting resource with a null upstream: no call.
-   - The global `operator new` counter has global allocation state, and `[const §VII.8]` admits to a
-     grouped executable only tests with none. So it lives in `tests/alloc_guard/`, on `wire_alloc_guard_test.cpp`'s
-     rig, and not in the grouped wire binary.
+4. **Zero allocation.** Each instrument names what makes it report non-zero.
+   - **The wire cell.** A counter upstream of a block too large to exhaust is never called, so it
+     could not report a list that creeps back. The counter is the parse resource itself:
+     `fixpp::test_support::pmr_allocation_tracking_resource` over a monotonic block, its
+     `allocate_calls()` read after `parse()` (the parse itself allocates), then `unknown_fields()`
+     called and iterated over a frame with an undefined tag, and the count must not have moved. **RED
+     on the base**, which builds its list in the parse resource.
+   - **The heap cell.** The global `operator new` counter has global allocation state, and
+     `[const §VII.8]` admits to a grouped executable only tests with none. So it lives in
+     `tests/alloc_guard/`, on `wire_alloc_guard_test.cpp`'s rig (mallocnesia, through
+     `tools/check_alloc.py`), and not in the grouped wire binary. Its frame gains an undefined tag, and
+     the window covers `unknown_fields()` and its iteration.
+     - **It is not RED on the base**: the base list draws on the pmr parse resource, which that rig
+       backs with a stack block and a null upstream, not on the heap. What it guards is a heap
+       allocation creeping into the walk.
+     - **Its known positives:** the population's positive control (`planted_alloc_witness.cpp`, run
+       by `check_alloc.py --expect-violation`) shows interception is live; and a mutant that builds a
+       plain `std::vector` inside `unknown_fields()` must turn the cell RED. That mutant's RED is
+       recorded in the evidence file.
 5. **Unchanged semantics, and the boundaries.**
    - New: document order over unknowns interleaved with known fields.
    - New: unknown tags inside one group instance and between instances, plus a trailing scalar. The
      cell asserts exact document order and every occurrence.
    - New: duplicate unknown tags through the parser path, each yielded.
    - New: `empty()` on a frame with none, and `begin() == end()`.
-   - New: an iterator taken from a temporary view stays valid while the `MessageView` lives.
+   - New: an iterator taken from a temporary view (`auto it = mv.unknown_fields().begin();`) stays
+     valid while the `MessageView` lives. It is the witness of the iterator contract's
+     `lifetimebound` choice (§1.4). On the base it fails to compile on clang under `-Werror`
+     (`-Wdangling`); on gcc it compiles and passes, because the base iterator is valid at runtime.
+   - New: the `same_as` assert of §1.4, `operator*` returns `kv` by value. RED on the base.
    - New: a view iterated after its `Parser` is destroyed, with the dictionary alive, still classifies.
      This extends the existing post-`Parser`-destroy cell from the first call to iteration.
 6. **Mutants.**
@@ -342,6 +419,10 @@ in 093's bundle as history.
    - `tag_defined` back to `field_valid_for`: the predicate cells of item 3 go RED.
    - Skip group-contained entries, and deduplicate equal tags: item 5's group and duplicate cells go
      RED.
+   - `operator*` returns `kv const&` from a `kv` cached in the iterator: the `same_as` assert goes
+     RED (§A.4, the `CACHED_REF` variant, on clang and gcc).
+   - Restore `[[clang::lifetimebound]]` on `begin()` and `end()`: item 5's temporary-view cell
+     stops compiling on clang (§A.4, the `KEEP_LB` variant).
 7. **Fuzz** (`[const §VII.7]`, parser-adjacent). `tests/fuzz/fuzz_wire_parser.cpp` gains a property
    check. A differential against a filter that uses the same classifier would be tautological, so the
    check states the properties instead:
@@ -349,8 +430,29 @@ in 093's bundle as history.
      10;
    - every such entry of `entries()` is yielded exactly once, in document order.
 
-   It runs over a parse resource with a null upstream and a tracking resource, so an allocation that
-   creeps back into the read is reported. The 10-minute PR campaign runs on it.
+   **The allocation counter is the parse resource itself.** The harness parses over a 256 KiB stack
+   `monotonic_buffer_resource` with a null upstream, and every fuzz frame's parse fits in it, so a
+   tracking resource at that arena's upstream would never be called and could not report a list that
+   creeps back. So:
+   - the parse resource becomes `fixpp::test_support::pmr_allocation_tracking_resource`
+     (`tests/support/pmr_allocation_tracking_resource.hpp`) with the monotonic arena as its upstream;
+   - its `allocate_calls()` is read after `parse()`, because the parse itself allocates; then
+     `unknown_fields()` is called and iterated, and the count must not have moved;
+   - **known positive:** the PR's harness run against the base header, with one seed frame that carries
+     an undefined tag, reports a non-zero delta, because the base builds its list in the parse
+     resource. That run (or the materialised-list mutant of item 6 under the harness) is recorded in
+     the evidence file. Without it the property could not report a non-zero result.
+   - **The positive must be the counter's, not another check's.** The seed's other tags satisfy the
+     classification properties on the base too: MsgType `D`, and only tags the table registers
+     under `D` through `add_valid_tag`, plus the one tag defined nowhere. The counter check runs
+     before the classification checks and fails with its own message, so the recorded failure names
+     the counter.
+
+   **Both sides of the predicate must fire.** The harness's table defines only the group tags 453, 448
+   and 447, so the "not yielded because defined" side would fire only on a frame that happens to carry
+   one of them. The table gains a few common tags through `table_view_builder::add_valid_tag` (for
+   example 34, 35, 49 and 55 under one MsgType); `add_valid_tag` marks the tag defined, so
+   `tag_defined` is true for them. The 10-minute PR campaign runs on it.
 8. **Bench**: the `bench/wire` cases of §1.4, timed by the transplanted A-B-A-B run, and CI's paired
    rows.
 
@@ -495,8 +597,12 @@ closed another way.
 ### 2.5 API, C ABI and layout
 
 - **C ABI: no change.** Neither type reaches `<fix/c_api.h>`.
-- **Public C++: source-compatible for every legal use.** Only a forgery stops compiling. Sizes do not
-  change: both stay empty classes.
+- **Public C++: no legal call or object changes; the keys' type properties do.** A forgery stops
+  compiling. What consumer code can also observe is a trait query on the type:
+  `std::is_trivially_copyable_v` becomes false for both keys, and `std::is_copy_constructible_v`
+  becomes false for `group_writer_token` (all four are true on the base, §A.4). A consumer `static_assert`, constraint or `if constexpr` on those traits can fail or take
+  another branch, although no consumer can legally hold a value of either key. Sizes do not change:
+  both stay empty classes.
 - **Calling convention.** A user-provided copy constructor makes the key non-trivial for the purposes of
   calls (Itanium and MSVC both pass it indirectly).
   - `group_writer_token` is taken by value only by `group_writer`'s inline constructor.
@@ -530,7 +636,10 @@ closed another way.
      - A one-level `#if __has_builtin(x)` is not a false branch there. The undefined identifier becomes
        `0`, and `0(x)` is not a valid `#if` expression.
      - The repo has no such guard yet: `git grep -n __has_builtin -- include src tests` prints nothing.
-       The `windows-msvc-debug -k 0` build of item 4 is the guard's test on MSVC.
+       What the guard finds on MSVC is read from the cell below, not from the build: a `-k 0` build
+       compiles cleanly both when the trait is found and the pins pass and when it is not found and
+       the pins are left out. §A.5 shows, with a stand-in name, that the nested shape falls through to
+       "not found" where the name is not a macro, and that the one-level shape is a preprocessor error.
    - **Inside the guard, known positives:** `static_assert(__builtin_is_implicit_lifetime(int))` and the
      base-shape replica (an implicit-lifetime type), each through the guard's macro.
    - **Where the trait exists.** §A.3's probe found it only on clang 22. Clang 18 and gcc 13, 14 and 15
@@ -541,22 +650,29 @@ closed another way.
        `clang++ --version`.
      - So the pin is evaluated on every Tier 1 clang lane whose `clang++ --version` line reads 22. The
        PR's first CI run is where to read that line.
-     - Until then, §A.3's local RED is the record. On gcc the guard leaves it out, and a test comment says so; it does not pretend
-     to pass. MSVC is not probed: what the guard finds there is shown by the build of item 4.
+     - Until then, §A.3's local RED is the record. On gcc the guard leaves it out, and a test comment
+       says so; it does not pretend to pass.
+   - **Which lanes evaluate the pins is a recorded per-lane fact.** The guard defines `kHasTrait` as
+     §A.3 does. One runtime cell beside the pins calls `GTEST_SKIP()` naming the lane (the compiler
+     and its version) when `kHasTrait` is false, and succeeds when it is true. The evidence file lists,
+     per lane and MSVC included, whether that cell ran or skipped, which is the list of lanes that can
+     kill the row-2 mutant.
 2. **RED proof.** Put the unfixed header first on the include path: exactly the negative asserts fire, on
    clang and gcc (104's method). **Mutants:**
    - Default the copy constructor of either key. The `bit_cast` asserts go RED, on every lane.
    - For `snapshot_key`, default the **default** constructor: row 2 of §2.4's table. Only the
      implicit-lifetime assert can kill it, so it is RED on the clang 22 lanes. On gcc, and on any lane
-     where the guard finds no trait, it survives by construction, and the test comment says so (§A.3
-     shows the RED).
+     where the guard finds no trait, it survives by construction, the test comment says so, and the
+     per-lane cell above skips there (§A.3 shows the RED).
    - For `group_writer_token`, the pin "not implicit-lifetime-*and*-copyable" has the base-shape
      replica as its known positive: for the replica the conjunction holds (§A.3).
 3. **Behaviour.** `writer_error_path_test` and `round_trip_property_test` (`open_group`) stay green,
    and so do the snapshot tests.
 4. **MSVC.** Build `windows-msvc-debug` with `-k 0` on the touched targets (the wire and dictionary
-   buckets, `fixpp_wire`, `fixpp_dict`). MSVC's `std::bit_cast` and `std::expected` are the ones not
-   probed in §A.
+   buckets, `fixpp_wire`, `fixpp_dict`), and run the per-lane trait cell of item 1. MSVC's
+   `std::bit_cast` and `std::expected` are the ones not probed in §A, and the build shows whether
+   they compile. Whether the implicit-lifetime pins are evaluated there is the trait cell's answer,
+   since a clean build is the outcome of both states.
 5. **The exclusivity gate** and its self-test, on the changed header.
 
 ---
@@ -675,6 +791,10 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
   `kParseContainers` is re-derived (§1.5), under an "Amended (W1)" line that quotes the old totals.
 - **Narrowed, not retired: `L-093-5`.**
   - Its `MessageView::unknown_fields()` bullet is deleted, with an "Amended (W1, #688)" line quoting it.
+  - **It is retitled.** The title says "two reports cannot be told from an absent result"; the two are
+    `group_slices()` and `unknown_fields()`. After the deletion only `group_slices()` is left, so
+    the title says "one report" (`group_slices()`), and the "Amended (W1, #688)" line quotes the old
+    title too.
   - The `OffsetTable::group_slices()` bullet stays live: a raw empty span still cannot be told from an
     absent group, and `group_slices_status()` is the status-bearing form.
   - Its other bullets are unchanged.
@@ -690,8 +810,14 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
     `get(tag)` and field iteration only.
   - Its cost is a classification per entry per iteration.
   - The dictionary it was parsed against must outlive every iteration, not only the first call.
-  - C++ source changes: the `kv`-span constructor is removed, and `iterator::operator*` returns `kv` by
-    value. C ABI: none. The layout is `B-707-1`'s.
+  - C++ source changes: the `kv`-span constructor and the iterator's `kv const*` constructor are
+    removed, and `iterator::operator*` returns `kv` by value. So `for (auto& x : …)`, `&*it` and a
+    reference held across `++` stop compiling or stop being valid; `kv const&` and `auto const&`
+    bindings keep compiling. C ABI: none. The layout is `B-707-1`'s.
+  - `begin()` and `end()` no longer carry `[[clang::lifetimebound]]`: an iterator taken from a
+    temporary view is valid, and clang no longer diagnoses one taken through a temporary
+    `MessageView` (`parse(…)->unknown_fields().begin()`), which dangles. `unknown_fields()` keeps
+    its own attribute.
 - **New: `B-559-1` (BREAKING, C++ only).** `wire::Writer` is constructed from its destination buffer
   alone. It allocates nothing, with or without groups. C ABI: none. The layout is `B-707-1`'s.
 - **New: `B-707-1`, one layout row in `B-104-7`'s shape.**
@@ -704,6 +830,10 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
       and not implicit-lifetime.
   - It says a consumer compiling against these installed headers must rebuild, and that the C ABI is
     unaffected.
+  - It says no legal call or object changes for the keys, but their type properties do:
+    `is_trivially_copyable` becomes false for both, and `is_copy_constructible` for
+    `group_writer_token`, so consumer code that queries those traits can fail or take another branch
+    (§2.5).
   - Re-derive its members from the diff of the touched headers, as `B-104-7` does.
   - Witnesses: the `static_assert`s of §2.6.
 
@@ -721,7 +851,7 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 - Appendix A's "Wire format / parser" row ("offset-table semantics, framing rules, validator changes")
   fires on D-688-1, as this table's parser row says.
 - Their state, in the shape of `.specify/563-564-callback-send.md` §0a:
-  - **Codex Gate A:** this loop. Round 1 is applied in v0.2 ("Gate A").
+  - **Codex Gate A:** this loop. Round 1 is applied in v0.2 and round 2 in v0.3 ("Gate A").
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
   - **`/analyze`:** by the spec-analyzer over the converged note, after Gate A and before
     implementation. Pending.
@@ -787,7 +917,7 @@ Re-run each recipe at implementation and disposition every hit.
   implicit-lifetime clause and the `make_shared` variant. That edit is the owner-approved form of
   104's anti-pattern candidate (close-out row 15); it lands only on that approval.
 
-## 7. Rulings applied (no open owner question)
+## 7. Rulings applied (no open design question)
 
 v0.1's Q-1 and Q-2 are answered. The rulings record (`decisions/speckit/pr-w1-688-707-559-owner-rulings.md`
 in the parent) holds each one; all four are orchestrator rulings under the owner's 2026-11-27
@@ -800,16 +930,47 @@ delegation, flagged for the owner's review at merge.
 - **R-W1-3 (Gate A round 1):** "unknown" is decided by `tag_defined(tag)`, not
   `field_valid_for(msg_type, tag)`. That widens #688 from "allocates" to "classifies". 081's texts are
   flagged and the comments amended (§6), and `B-688-1` records the changed set (§4).
-- **R-W1-4 (Gate A round 1):** the predictable slowdown of the cold shapes is accepted if the paired
-  numbers confine it to them. A hot-path regression past `[const §VIII.2]`'s band blocks the merge and
-  goes to the owner (§1.4).
+- **R-W1-4 (Gate A round 1; amended twice in round 2):** §VIII.2 approval comes after the measurement,
+  never before. The note names the shapes expected to regress and their instrument, and accepts
+  nothing in advance. Each over-band row from the paired run is posted in the PR thread with its
+  figures and the orchestrator's recommendation, and the owner's ratification there is a merge
+  condition; "merge if green" does not cover it. If no row is over the band, no approval is needed. A
+  regression past the band on the dispatch path (CI's paired rows) blocks the merge and goes to the
+  owner (§1.4).
 
-No technical question is left open. `[2b §4.8]`, R-W1-3 and the correctness rule settle #688. The
+No technical question is left open. One owner act may be needed later, and it is conditional: the
+PR-thread ratification of an over-band bench row, if the measurement produces one. `[2b §4.8]`, R-W1-3 and the correctness rule settle #688. The
 measured compile matrix settles #707's shapes. The code settles #559.
 
 ## Gate A
 
 - Round 1 applied 2026-11-27: Codex P1=3 P2=7 P3=2; Opus post-judging P1=1 P2=9 P3=7; rewrite addresses root causes #1 (the classification predicate is `field_valid_for` where `[2b §4.8]` specifies "not defined by the dictionary"), #2 (re-derive recipes that did not reproduce every item the note names), #3 (perf evidence planned through an instrument that cannot time it). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+- Round 2 applied 2026-11-27: Codex P1=1 P2=2 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes #1 (an acceptance written ahead of its measurement and outside the PR thread), #2 (the by-value iterator is a public contract change whose attributes, witness and disclosure were not derived from the type), #3 (instruments not shown to be able to report non-zero). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+### Round 2 — how each finding was applied
+
+| Finding | Root cause | Where v0.3 answers it |
+|---|---|---|
+| Codex F-1 (P1) | #1 | Status block, §1.4 "What a slowdown needs", §7 R-W1-4: R-W1-4 as amended twice; over-band rows posted in the PR thread, owner ratification a merge condition |
+| Codex F-3 (P2) | #2 | §1.4 iterator contract: the `same_as` pin, RED on the base; §1.6 items 5 and 6 (the cached-reference mutant); §A.4 |
+| Opus NEW-1 (P2) | #2 | §1.4 iterator contract: `begin()`/`end()` drop `[[clang::lifetimebound]]`, with the trade and the rejected pragma; §1.6 items 5 and 6; `B-688-1`; §A.4 |
+| Opus NEW-3 (P3) | #2 | §1.5 and `B-688-1`: `auto&`, `&*it`, a reference across `++`, the `kv const*` constructor |
+| Opus NEW-2 (P2) | #3 | §1.6 item 7: the counter is the parse resource, read after `parse()`, with its known positive, which names the counter; the table gains defined tags |
+| Root cause #3, applied beyond NEW-2 | #3 | §1.6 item 4: the wire cell's counter is the parse resource (RED on the base); the heap cell is not RED on the base and names its positive control and a `std::vector` mutant |
+| Opus NEW-5 (P3) | #3 | §1.4: the condition, and the recipe with `\b` and its known positive |
+| Opus NEW-6 (P3) | #3 | §2.6 items 1, 2 and 4: a per-lane `kHasTrait` cell that skips by name; §A.5 |
+| Codex F-2 (P3 after judging) | — | §2.5 and `B-707-1`: the keys' type properties change; §A.4. Severity disagreement below |
+| Codex F-4 (P3) | — | §1.4 "Cost": the proven change only; the net cost is measured |
+| Opus NEW-4 (P3) | — | §4 `L-093-5`: retitled "one report", the old title quoted |
+
+### Round 2 — disagreements
+
+- **Codex F-2, severity only (Codex P2; Opus P3).** The facts are right, and v0.3 applies Codex's
+  wording fix in §2.5 and `B-707-1`. What Opus disputes is the severity. No consumer can legally hold
+  a value of either key, because nothing outside the friend can mint one. So only what a trait query
+  on the type answers changes; no behaviour, layout or legal call does. It is a disclosure
+  correction.
 
 ### Round 1 — how each finding was applied
 
@@ -1024,5 +1185,137 @@ int main() { return kHasTrait ? 0 : 1; }
 | clang 18 | compiles; trait not found (exit 1) | compiles: the assert is left out | not run |
 | gcc 13.3, 14, 15 | compiles; trait not found (exit 1) | compiles: the assert is left out | not run |
 
-So the decisive row-2 pin is evaluated only where the trait exists. MSVC is not probed here; its
-`-k 0` build is the guard's test (§2.6 item 4).
+So the decisive row-2 pin is evaluated only where the trait exists. MSVC is not probed here; the
+per-lane trait cell of §2.6 item 1 records what the guard finds there.
+
+### A.4 The iterator contract (run 2026-11-27; `-std=c++23 -fsyntax-only -Werror`)
+
+**Against the real headers at `b93b8a28`** (`-Iinclude`; gcc adds `-Wall -Wextra
+-Wno-attributes=clang::lifetimebound`, the form `cmake/Helpers.cmake` applies to GNU C++):
+
+```cpp
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/unknown_fields.hpp>
+#include <concepts>
+#include <utility>
+int f(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& mv) {
+    auto it = mv.unknown_fields().begin();
+    auto e = mv.unknown_fields().end();
+    int n = 0;
+    for (; !(it == e); ++it) { n += (*it).tag; }
+    return n;
+}
+#ifdef AUTOREF
+int g(fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& mv) {
+    int n = 0; for (auto& x : mv.unknown_fields()) n += x.tag; return n; }
+#endif
+#ifdef SAMEAS
+using fixpp::wire::unknown_fields_view;
+static_assert(std::same_as<decltype(*std::declval<unknown_fields_view::iterator const&>()),
+                           unknown_fields_view::kv>, "operator* returns kv by value");
+#endif
+```
+
+| Variant | clang 22.1.2 | gcc 13, 14, 15 |
+|---|---|---|
+| plain | **error**: `-Wdangling` on `it` and on `e` (the attribute on `begin()`/`end()`) | compiles |
+| `-DSAMEAS` | **error**: the `same_as` assert fires (and the `-Wdangling` pair) | **error**: the `same_as` assert fires |
+| `-DAUTOREF` | `g` compiles (only `f`'s `-Wdangling` pair) | compiles |
+
+Clang 18 is not run against the real headers: with its default library it has no `std::expected`.
+
+**The key traits on the base** (clang 22, real headers): `static_assert`s that
+`is_trivially_copyable_v` and `is_copy_constructible_v` hold for `group_writer_token` and
+`dict::detail::snapshot_key` compile; the control, `is_trivially_copyable_v<fixpp::wire::group_writer>`,
+fires (a user-provided destructor), so the probe can report a failure.
+
+**A replica of the D-688-1 shape** (iterator holding its context by value, `MV::unknown_fields()`
+carrying `[[clang::lifetimebound]]`; the same flags as above):
+
+```cpp
+#include <concepts>
+#include <cstdint>
+#include <utility>
+struct kv { std::uint16_t tag; };
+struct entry { std::uint16_t tag; };
+struct ufv {
+  entry const* b_ = nullptr; entry const* e_ = nullptr;
+  struct iterator {
+    entry const* p_; entry const* e_;
+#ifdef CACHED_REF
+    kv cur_{};
+    kv const& operator*() const noexcept { return cur_; }
+#else
+    kv operator*() const noexcept { return kv{p_->tag}; }
+#endif
+    iterator& operator++() noexcept { ++p_; return *this; }
+    bool operator==(iterator const& o) const noexcept { return p_ == o.p_; }
+  };
+#ifdef KEEP_LB
+  iterator begin() const noexcept [[clang::lifetimebound]] { return {b_, e_}; }
+  iterator end() const noexcept [[clang::lifetimebound]] { return {e_, e_}; }
+#else
+  iterator begin() const noexcept { return {b_, e_}; }
+  iterator end() const noexcept { return {e_, e_}; }
+#endif
+  bool empty() const noexcept { return b_ == e_; }
+};
+struct MV { entry es[4]{}; ufv unknown_fields() const noexcept [[clang::lifetimebound]] { return {es, es + 4}; } };
+MV make_mv();
+int f(MV const& mv) {
+  auto it = mv.unknown_fields().begin();
+  auto e = mv.unknown_fields().end();
+  int n = 0; for (; !(it == e); ++it) n += (*it).tag; return n;
+}
+#ifdef TMP_VIEW
+int h() { auto v = make_mv().unknown_fields(); return v.empty(); }
+#endif
+#ifdef TMP_MV_ITER
+int k() { auto it = make_mv().unknown_fields().begin(); return (*it).tag; }
+#endif
+#ifdef AUTOREF
+int g(MV const& mv) { int n = 0; for (auto& x : mv.unknown_fields()) n += x.tag; return n; }
+#endif
+static_assert(std::same_as<decltype(*std::declval<ufv::iterator const&>()), kv>, "operator* returns kv by value");
+```
+
+| Variant | clang 22.1.2 and clang 18 | gcc 13, 14, 15 |
+|---|---|---|
+| plain (attribute dropped) | compiles | compiles |
+| `-DKEEP_LB` | **error**: `-Wdangling` on `it` and `e` in `f`, the valid idiom | compiles |
+| `-DKEEP_LB -DTMP_MV_ITER` (clang 22) | **error**: the same pair, and `k`'s `it` | not run |
+| `-DCACHED_REF` | **error**: the `same_as` assert fires | **error**: the same |
+| `-DTMP_VIEW` | **error**: `-Wdangling` on `v`, from `unknown_fields()`'s own attribute | compiles |
+| `-DTMP_MV_ITER` | compiles: the dangle through `begin()` is not diagnosed (the cost) | compiles |
+| `-DAUTOREF` | **error**: a non-const lvalue reference cannot bind a temporary `kv` | **error**: the same |
+
+### A.5 The guard's nested shape where the name is not a macro (run 2026-11-27; compile and run)
+
+`W1_NOT_A_MACRO` stands in for `__has_builtin` on a preprocessor that does not define it. It is a
+stand-in for the preprocessor rule, not a probe of MSVC: `#undef __has_builtin` is no stand-in,
+because clang 22 and gcc 15 keep answering through it.
+
+```cpp
+#ifdef ONE_LEVEL
+#if W1_NOT_A_MACRO(__builtin_is_implicit_lifetime)
+#define W1_IL 1
+#endif
+#else
+#if defined(W1_NOT_A_MACRO)
+#if W1_NOT_A_MACRO(__builtin_is_implicit_lifetime)
+#define W1_IL 1
+#endif
+#endif
+#endif
+#if defined(W1_IL)
+constexpr bool kHasTrait = true;
+#else
+constexpr bool kHasTrait = false;
+#endif
+int main() { return kHasTrait ? 0 : 1; }
+```
+
+| Variant | clang 22.1.2 | gcc 15 |
+|---|---|---|
+| nested (the guard of §2.6) | compiles; exit 1 (trait not found) | compiles; exit 1 |
+| `-DONE_LEVEL` | **error**: "function-like macro 'W1_NOT_A_MACRO' is not defined" | **error**: "missing binary operator before token '('" |
