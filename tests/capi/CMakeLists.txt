@@ -798,7 +798,7 @@ target_include_directories(capi_106_give_up_test PRIVATE
 target_compile_definitions(capi_106_give_up_test PRIVATE
   "FIXPP_DICT_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 add_test(NAME capi_106_give_up COMMAND capi_106_give_up_test)
-set_tests_properties(capi_106_give_up PROPERTIES LABELS "capi;106" TIMEOUT 120)
+set_tests_properties(capi_106_give_up PROPERTIES LABELS "capi;106" TIMEOUT 70)
 
 # 099-fixt-appl-version-validation W-20 (tasks.md T034), FR-028. Standalone ([const §VII.8]): it
 # replaces global operator new with a fail-at-N hook. Here and not in tests/session because its
