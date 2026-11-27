@@ -63,6 +63,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reserved_ports.hpp"
 
 using namespace std::chrono_literals;
 
@@ -78,17 +79,7 @@ const char* get_fixture_dir() {
     return (dir && dir[0] != '\0') ? dir : kDir;
 }
 
-// Reserve a free loopback port: bind a throwaway acceptor to port 0, read the
-// OS-assigned port, then release it. The engine acceptor re-binds it at start().
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
 
 bool is_established(fixpp::session::Session* s) {
     return s != nullptr && (s->state() == fixpp::session::fsm_state::Active ||
@@ -125,7 +116,7 @@ TEST(EngineLifecycleTest, TwoSessionRegisterStartLookupStop) {
     ASSERT_TRUE(fac_r.has_value()) << "transport factory build failed";
     std::shared_ptr<fixpp::transport::TransportFactory> fac{std::move(*fac_r)};
 
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
 
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();

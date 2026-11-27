@@ -61,6 +61,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reserved_ports.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -111,15 +112,7 @@ const char* get_fixture_dir() {
     return (env && env[0] != '\0') ? env : kDir;
 }
 
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
 
 std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
@@ -298,7 +291,7 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
 
     SessionId acc_id;
     SessionId ini_id;
-    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_loopback_port(ioc), acc_id, ini_id));
 
     // Foreign thread: call co_spawn (thread-safe post) and return immediately.
     // The coroutine runs on the ioc thread (not the foreign thread).
@@ -385,7 +378,7 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
 
     SessionId acc_id;
     SessionId ini_id;
-    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_loopback_port(ioc), acc_id, ini_id));
 
     // Wire the hook: when toApp fires for the first message, post a handler that
     // issues another engine.send(). The post is what defers the send in this cell.
@@ -470,7 +463,7 @@ TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
 
     SessionId acc_id;
     SessionId ini_id;
-    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_loopback_port(ioc), acc_id, ini_id));
 
     // Wire fromApp hook: when the acceptor's fromApp fires (inbound app msg from
     // initiator), issue a re-entrant engine.send() back on the initiator.
@@ -578,7 +571,7 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
 
     SessionId acc_id;
     SessionId ini_id;
-    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
+    ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_loopback_port(ioc), acc_id, ini_id));
 
     // Cancellation signal bound to the Engine::send coroutine's completion token.
     // A total emission from toApp (which fires INSIDE the send_counter_ window)

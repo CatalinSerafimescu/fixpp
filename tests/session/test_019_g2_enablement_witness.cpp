@@ -58,6 +58,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reserved_ports.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -129,17 +130,7 @@ const char* get_fixture_dir() {
     return (env && env[0] != '\0') ? env : kDir;
 }
 
-// Reserve a free loopback port so we can register the acceptor + initiator with
-// the same port before start() (mirrors engine_lifecycle_test.cpp).
-uint16_t reserve_free_port(asio::io_context& ioc) {
-    asio::ip::tcp::acceptor a{ioc};
-    asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
-    a.open(ep.protocol());
-    a.bind(ep);
-    uint16_t port = a.local_endpoint().port();
-    a.close();
-    return port;
-}
+using fixpp::test_support::reserve_loopback_port;
 
 // ── WitnessApplication ────────────────────────────────────────────────────────
 // Tracks each (SessionId, MsgType) pair observed via fromApp.
@@ -245,7 +236,7 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     std::shared_ptr<fixpp::transport::TransportFactory> fac{std::move(*fac_r)};
 
     // ── Reserve a port so both sessions can be registered with the same port ──
-    const uint16_t port = reserve_free_port(ioc);
+    const uint16_t port = reserve_loopback_port(ioc);
 
     // ── Build the application and engine ─────────────────────────────────────
     auto app = std::make_shared<WitnessApplication>();
