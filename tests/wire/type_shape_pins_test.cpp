@@ -44,3 +44,55 @@ static_assert(!std::is_constructible_v<fixpp::wire::Writer, std::span<std::byte>
               "Writer still takes a scratch memory resource");
 static_assert(std::is_nothrow_constructible_v<fixpp::wire::Writer, std::span<std::byte>>,
               "Writer(dst) is the constructor, and it does not throw");
+
+// ── fixpp#707 (D-707-1): group_writer_token cannot be made outside Writer ───────────────────
+// Its copy constructor is user-provided and private, so the key is neither trivially copyable
+// (which std::bit_cast needs) nor copy-constructible outside Writer. It is implicit-lifetime (its
+// defaulted default constructor is trivial), which is harmless only while no non-friend can copy
+// it: an implicitly created object is an lvalue, which a by-value parameter has to copy.
+namespace w1_pins {
+class base_shape_friend;
+// The base shape of the key (a defaulted private default constructor, an implicit copy): the
+// same-shape known positive for every negative pin below.
+class base_shape_key {
+    base_shape_key() noexcept = default;
+    friend class base_shape_friend;
+};
+}  // namespace w1_pins
+
+static_assert(bit_castable<w1_pins::base_shape_key>,
+              "the base shape is bit_cast-able, so bit_castable can say yes for this shape");
+static_assert(!std::is_trivially_copyable_v<fixpp::wire::group_writer_token>,
+              "group_writer_token is trivially copyable, so std::bit_cast can forge one");
+static_assert(!std::is_copy_constructible_v<fixpp::wire::group_writer_token>,
+              "group_writer_token is copy-constructible outside Writer");
+static_assert(!bit_castable<fixpp::wire::group_writer_token>,
+              "std::bit_cast can make a group_writer_token outside Writer");
+#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(int), "the trait's known positive");
+static_assert(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_key) &&
+                  std::is_copy_constructible_v<w1_pins::base_shape_key>,
+              "the conjunction holds for the base shape, so the pin below can fail");
+static_assert(!(FIXPP_TEST_IMPLICIT_LIFETIME(fixpp::wire::group_writer_token) &&
+                std::is_copy_constructible_v<fixpp::wire::group_writer_token>),
+              "an implicitly created group_writer_token could be copied into a group_writer");
+#endif
+
+namespace {
+
+// Where the compiler offers no implicit-lifetime query, the pins above are left out; this cell
+// then skips and names the compiler, so the test log lists the lanes that evaluated them.
+TEST(WireTypeShapePins, GroupWriterTokenImplicitLifetimePinIsEvaluatedOnThisLane) {
+    namespace il = fixpp::test_support::implicit_lifetime;
+    if (!il::kHasTrait) {
+        GTEST_SKIP() << "no implicit-lifetime trait on " << il::kCompiler
+                     << ": the implicit-lifetime pins are left out on this lane";
+    }
+#if defined(FIXPP_TEST_IMPLICIT_LIFETIME)
+    EXPECT_TRUE(FIXPP_TEST_IMPLICIT_LIFETIME(w1_pins::base_shape_key));
+    EXPECT_FALSE(FIXPP_TEST_IMPLICIT_LIFETIME(fixpp::wire::group_writer_token) &&
+                 std::is_copy_constructible_v<fixpp::wire::group_writer_token>);
+#endif
+}
+
+}  // namespace

@@ -36,10 +36,17 @@ class Writer;
 
 // Passkey token: only Writer can create a group_writer_token, ensuring
 // group_writer is only constructed through Writer::open_group.
+// W1 (`.specify/688-707-559-wire-headroom-token.md` D-707-1, fixpp#707): the copy constructor
+// is user-provided and private, so the token is not trivially copyable (std::bit_cast cannot
+// make one) and only Writer can pass one. Re-derive with the static_asserts in
+// tests/wire/type_shape_pins_test.cpp.
 struct group_writer_token {
 private:
     friend class Writer;
     group_writer_token() noexcept = default;
+    // A defaulted copy constructor is trivial, so the token would be bit_cast-able again.
+    // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+    group_writer_token(group_writer_token const& /*other*/) noexcept {}
 };
 
 // ── group_writer ──────────────────────────────────────────────────────────────
@@ -98,6 +105,11 @@ public:
 
     // Repeating-group: write "no_tag=count\x01" and return a group_writer that
     // aliases *this. Nesting must close in LIFO order (last opened, first closed).
+    // The group_writer is built in Writer's scope and moved into the result, because the
+    // token's copy constructor is private to Writer (std::in_place would copy it inside the
+    // standard library). The moved-from temporary still holds this owner when it is destroyed,
+    // so its destructor runs close_impl() once more: harmless while close_impl() writes nothing,
+    // and a close_impl() that writes must first make a moved-from group_writer inert.
     [[nodiscard]] core::expected_t<group_writer> open_group(std::uint16_t no_tag,
                                                             std::uint32_t count) noexcept
         [[clang::lifetimebound]];
