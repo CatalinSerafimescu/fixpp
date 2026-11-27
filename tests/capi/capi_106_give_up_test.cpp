@@ -14,8 +14,9 @@
 // instant, inside the Span answer_logon returns), and the close follows at G + B.
 //
 // The cell asserts:
-//   - reach: a send call was in flight for kParkedAfter before L + 3T, and
-//     fixpp_session_is_established read true then;
+//   - reach: a send call that started before lo + T (so the liveness loop's first emit after L
+//     queues behind its write and the give-up instant is L + 3T + 1 ns) was in flight for
+//     kParkedAfter before lo + 3T, and fixpp_session_is_established read true then;
 //   - that call returned FIXPP_ERR_CANCELLED (B-105-8's value) no earlier than lo + 3T + B and no
 //     later than hi + 3T + B + kMargin, lo and hi the Span's ends;
 //   - fixpp_session_is_established read false after the ending.
@@ -34,6 +35,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <thread>
@@ -174,6 +176,12 @@ TEST(Capi106GiveUp, SendBlockedAtGiveUp_ReturnsCancelled_IsEstablishedFalse) {
     auto const parked = flood.wait_parked(give_up_lo);
     ASSERT_TRUE(parked.has_value())
         << "setup: no send call parked before L + 3T; calls returned " << flood.calls();
+    // The readings kMargin's recipe and the reach condition are re-derived from, on every run.
+    std::cout << "[capi_106_give_up] parked call " << flood.parked_call() << " started at lo + "
+              << ms_of(*parked - at->lo) << " ms\n";
+    ASSERT_LT(*parked, at->lo + kThreshold)
+        << "setup: the parked call started " << ms_of(*parked - at->lo)
+        << " ms after lo, not before lo + T: the loop's TestRequest may have been written";
     bool const established_while_parked = s.established();
     bool const sampled_before_give_up = steady::now() < give_up_lo;
     ASSERT_TRUE(sampled_before_give_up) << "setup: the parked call was found after L + 3T";
@@ -190,6 +198,8 @@ TEST(Capi106GiveUp, SendBlockedAtGiveUp_ReturnsCancelled_IsEstablishedFalse) {
             << "returned " << ms_of(close_lo - flood.returned_at()) << " ms before lo + 3T + B";
         EXPECT_LE(flood.returned_at(), close_hi + kMargin)
             << "returned " << ms_of(flood.returned_at() - close_hi) << " ms after hi + 3T + B";
+        std::cout << "[capi_106_give_up] returned at hi + 3T + B + "
+                  << ms_of(flood.returned_at() - close_hi) << " ms\n";
     }
     rl::EstablishedWatch watch{s};
     watch.watch_until(steady::now() + rl::kStepBudget);
