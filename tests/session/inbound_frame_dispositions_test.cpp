@@ -1549,7 +1549,7 @@ std::size_t expected_parse_buffer(std::uint32_t limit) {
     // (alignof(OffsetTable::entry) - 1) + (alignof(std::uint32_t) - 1).
     constexpr std::size_t kAlignPad = 6;
     constexpr std::size_t kCallbackReadHeadroom = 16384;
-    constexpr std::size_t kParseContainers = 10;
+    constexpr std::size_t kParseContainers = 8;
     // A proxy is pointer-aligned: alignof(void*) - 1, worked by hand.
     constexpr std::size_t kProxyPad = 7;
     return (12U * n) + (4U * cap) + kAlignPad + kCallbackReadHeadroom +

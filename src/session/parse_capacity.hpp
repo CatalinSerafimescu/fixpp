@@ -31,8 +31,10 @@ inline constexpr std::size_t kContainerSlack = 16;
 // members MessageView<Index> and OffsetTable construct from the parse resource, times one
 // plus the number of times Session's parse path moves the view before a callback or the
 // validator reads it (MSVC's vector move constructor draws a fresh proxy). Re-derive at
-// a change to either class or to Parser::parse's reserve overload.
-inline constexpr std::size_t kParseContainers = 10;
+// a change to either class or to Parser::parse's reserve overload. W1
+// (`.specify/688-707-559-wire-headroom-token.md` §1.5) re-derived it when MessageView's unknown-field
+// list was deleted.
+inline constexpr std::size_t kParseContainers = 8;
 
 // The padding before a proxy: it is pointer-aligned, so after a request of smaller
 // alignment it is placed at most alignof(void*) - 1 bytes further on.
