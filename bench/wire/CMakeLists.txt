@@ -33,6 +33,11 @@ target_link_libraries(parser_bench PRIVATE
   benchmark::benchmark_main
 )
 target_include_directories(parser_bench PRIVATE "${_WIRE_TEST_SUPPORT_INC}")
+# W1 (`.specify/688-707-559-wire-headroom-token.md` §1.4): the unknown_fields() cases load the
+# real FIX44.xml; fixpp_dictionary reaches the target through fixpp_wire's public link.
+target_compile_definitions(parser_bench PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
 set_target_properties(parser_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
 )
