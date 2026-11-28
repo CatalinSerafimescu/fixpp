@@ -541,7 +541,7 @@ and the dictionary's answers. Each is fixed after construction:
   (nothing is written over an empty table) keeps `unknown_fields()` from writing it, because
   `kEmpty`'s table is default-constructed and empty. Test (e) pins the rule.
   - **Disclosed and filed, not fixed here:** `group<>()` on `kEmpty` already writes
-    `set_group_context`'s members (read). That is fixpp#736 (OPEN, batch B96), "owning_message_handle::view()'s
+    `set_group_context`'s members (read). That is fixpp#736 (batch B96), "owning_message_handle::view()'s
     shared static empty MessageView is written by const group<>() on every thread". Whether a
     declined slice read on its empty table also memoises a row in `group_index_` was not traced
     here. It predates W1 and is outside it.
@@ -758,9 +758,10 @@ bundle from `tests/support/dict_hooks_test_access.hpp`'s `make`:
       `data() + k` over its empty table, whose `data()` is null, with `k > 0` because entry 0 is the
       framing tag 8, and the constructor reads that entry. That is undefined behaviour, so how it
       ends depends on the lane:
-      - on the clang UBSan lanes, `-fsanitize=undefined` (`cmake/Sanitizers.cmake`) includes clang's
-        pointer-overflow check, which flags a non-zero offset applied to a null pointer, and the test
-        preset's `UBSAN_OPTIONS=halt_on_error=1` (`CMakePresets.json`) ends the child. RED by the
+      - on the clang UBSan lanes (`linux-clang-ubsan`, `linux-clang-libc++-ubsan`),
+        `-fsanitize=undefined` (`cmake/Sanitizers.cmake`) includes clang's pointer-overflow check,
+        which flags a non-zero offset applied to a null pointer, and both test presets'
+        `UBSAN_OPTIONS=halt_on_error=1` (`CMakePresets.json`) end the child. RED by the
         halted diagnostic. That claim is clang's: gcc's UBSan is not claimed to flag it;
       - elsewhere, RED by the SIGSEGV observed or by exit 1, neither guaranteed.
       - In the index-unset arm the source holds the sentinel, so M4 cannot show there.
@@ -1643,7 +1644,7 @@ Re-run each recipe at implementation and disposition every hit.
   - **The live B&L:** `B-688-1` and `B-707-1` (§4).
   - **Disclosed and filed, not edited here:** `group<>()` writes `set_group_context`'s members on
     the shared `kEmpty` of `owning_message_handle::view()` (§1.4a, the thread contract). It is
-    fixpp#736 (OPEN, batch B96).
+    fixpp#736 (batch B96).
   - **Disclosed, to be filed (the orchestrator files it): `OffsetTable::build` truncates the value
     offsets and lengths of a frame past 4 GiB, with no error.**
     - `OffsetTable::build` (`src/wire/offset_table.cpp`) narrows each entry's value offset and value
@@ -1651,11 +1652,16 @@ Re-run each recipe at implementation and disposition every hit.
       bounds the frame to fit: `frame_view`'s lengths and `Framer::Config::max_frame_bytes` are
       `std::size_t` (`include/fixpp/wire/framer.hpp`), and `OffsetTable::Config::max_offset_entries`
       is an unclamped `std::size_t` (`include/fixpp/wire/offset_table.hpp`).
-    - So a frame longer than 4 GiB, parsed by a direct C++ `Parser` with `max_frame_bytes` and
-      `max_offset_entries` raised past their defaults, gets a wrong offset for every value that starts
-      at or past byte 2^32, and a wrong length for any value of 4 GiB or more, with no error.
-    - The overlay's slot value, `static_cast<std::uint32_t>(e) + 1U`, wraps at a second threshold: a
-      table of more than 2^32 − 1 entries.
+    - So a frame longer than 4 GiB that reaches a direct C++ `Parser` gets a wrong offset for every
+      value that starts at or past byte 2^32, and a wrong length for any value of 4 GiB or more, with
+      no error. The frame's length alone decides it: a frame with a few fields, one of them a
+      several-GiB value, stays far below the default `max_offset_entries`. Such a frame reaches the
+      parser through a `Framer` whose `max_frame_bytes` is raised past its default, or through
+      `frame_view_slice_access::make` (`include/fixpp/wire/framer.hpp`), a public seam that mints a
+      `frame_view` without the Framer. A Data value cannot be the long one: `build` saturates a
+      declared Data length at `0xFFFFFFFF`.
+    - The overlay's slot value, `static_cast<std::uint32_t>(e) + 1U`, wraps at a second threshold, a
+      table of more than 2^32 − 1 entries, which also needs `max_offset_entries` raised.
     - Re-derive the narrowings with
       `git grep -n -E 'static_cast<std::uint32_t>\((val_start|val_len|e)\)' -- src/wire/offset_table.cpp`.
     - Reach: the session's inbound path cannot reach it, because its frame limit is a
