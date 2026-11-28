@@ -1,7 +1,7 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
 > **Status: v0.7: scoped Gate A CONVERGED round 5 (P1=0, P2=0; P3s applied) (Codex codex_688_707_559_5…, 2026-11-28). v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10. v0.6: R-W1-6 delta, D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
-> Issue-mode design note. v0.5 (D-688-1, D-707-1/2, D-559-1) is implemented on the branch; D-688-2 is not yet. Branch
+> Issue-mode design note. v0.5 (D-688-1, D-707-1/2, D-559-1) is implemented on the branch, and so is D-688-2 (v0.7). Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
 >
@@ -1305,7 +1305,8 @@ closed another way.
      (`src/session/admin_messages.cpp` and `session.cpp` construct a `Writer`); `wire_pure_tests`
      and `wire_dict_tests`; `dictionary_pure_tests` (`dictionary_snapshot_test.cpp`),
      `dictionary_fixt_header_merge_test`, `dictionary_reify_shared_table_concurrency_test` and, with
-      D-688-2, `dictionary_reify_shared_empty_view_concurrency_test` (§1.4a cell (e));
+      D-688-2, `dictionary_reify_shared_empty_view_concurrency_test` (§1.4a cell (e)) and
+      `dictionary_reify_tests` (cell (b)'s reify cell, by the re-derive rule below);
      `session_inbound_frame_dispositions` (Q-33, Sc007); `wire_alloc_guard_test`; and the targets
      that compile `tests/interop/conversation/support/conv_wire.hpp`: `interop_conversation_test`,
      `interop_hp_fixt50sp2_logon_hb_logout_test` and `interop_readback_witness_test`.
@@ -2210,6 +2211,19 @@ the incomplete-type error print `S<…>`.
 **The after-run passes when**, on clang and gcc, in release and in debug, `first_unknown_`'s offset
 lies between `resolved_application_version_`'s and `dict_owner_`'s, and both modes' `sizeof` and
 `alignof` equal this before-run's. MSVC was not run here (§1.4a, the layout).
+
+**The after-run (run 2026-11-28, at `f84caed2`, D-688-2 implemented; the same TU and toolchains; MSVC 14.44.35207 with `/d1reportSingleClassLayoutMessageView`, `-std:c++latest`, debug `/MDd /D_DEBUG` and release `/MD /O2 /DNDEBUG`; the before columns re-read in the same session from `git archive 10e73842 include`).** Raw output: `/mnt/wsl/fixppbuild/evidence/w1-688-707-559/d688-2/` (`layout-*`, `msvc/layout-*`).
+
+| | before (`10e73842`) | after |
+|---|---|---|
+| clang release, Index: `sizeof` / `align`; `resolved_application_version_`, `first_unknown_`, `dict_owner_` | 352 / 8; 336, none, 344 | 352 / 8; 336, 340, 344 |
+| clang debug, Index | 368 / 8; 352, none, 360 | 368 / 8; 352, 356, 360 |
+| clang release / debug, Iter: `sizeof` / `align` | 32 / 8, 40 / 8 | 32 / 8, 40 / 8 (`first_unknown_` empty, offset 0) |
+| gcc release / debug, `S<Index size, align, Iter size, align>` | `S<352, 8, 32, 8>`, `S<368, 8, 40, 8>` | the same |
+| MSVC release, Index / Iter `size` | 352 / 48 | 352 / 48 (`first_unknown_` at 340; Iter's empty member a byte of the tail padding) |
+| MSVC debug, Index / Iter `size` | 400 / 56 | 400 / 56 (`first_unknown_` at 388) |
+
+The pass condition above holds on clang and gcc, and on MSVC for `size` (the switch reports no alignment). The M5 mutant (an `entry const*` in place of the index), read by the same recipe, gives Index 360 / 376 on clang and gcc, release / debug.
 
 ### A.7 The encoding's predicates and the member's initializer, standalone (run 2026-11-28; clang 22.1.2, gcc 13.3.0; `-std=c++23 -fsyntax-only`)
 
