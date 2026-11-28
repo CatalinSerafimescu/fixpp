@@ -92,6 +92,41 @@ TEST(WireUnknownFields, DocumentOrderInterleavedWithKnownFields) {
     }
 }
 
+// One bound view iterated twice yields the same ordered fields on each pass: iterating a view
+// does not consume it.
+TEST(WireUnknownFields, OneViewIteratedTwiceYieldsTheSameSequence) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "5000=a\x01"
+        "55=X\x01"
+        "5001=b\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    fixpp::dict::table_view const dict = known_35_34_55();
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    auto mv = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv.has_value());
+
+    auto const uf = mv->unknown_fields();
+    std::vector<std::pair<std::uint16_t, std::string>> first_pass;
+    for (auto const& kv : uf) {
+        first_pass.emplace_back(kv.tag,
+                                std::string{reinterpret_cast<char const*>(kv.data), kv.len});
+    }
+    std::vector<std::pair<std::uint16_t, std::string>> second_pass;
+    for (auto const& kv : uf) {
+        second_pass.emplace_back(kv.tag,
+                                 std::string{reinterpret_cast<char const*>(kv.data), kv.len});
+    }
+
+    std::vector<std::pair<std::uint16_t, std::string>> const expected{{5000, "a"}, {5001, "b"}};
+    EXPECT_EQ(first_pass, expected);
+    EXPECT_EQ(second_pass, expected);
+    EXPECT_FALSE(uf.empty());
+}
+
 // Unknown tags between two group instances, inside the second one, and after the group as a
 // trailing scalar: every occurrence, in document order, whether or not the group was read first.
 TEST(WireUnknownFields, UnknownTagsAroundAndInsideGroupInstancesInDocumentOrder) {
