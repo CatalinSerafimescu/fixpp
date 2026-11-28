@@ -202,6 +202,11 @@ with the flag on (plan.md OD-4).
   An empty `unknown_fields()` view after exhaustion cannot be told from a frame with no unknown
   fields (L-5).
 
+  *(Amended 2026-11-28, W1, `.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688:)* the `unknown_fields()` row and the
+  sentence after the table are superseded: since W1 `unknown_fields()` is the filtered view of
+  `[2b §4.8]`, which allocates nothing, so it has no exhaustion to report and yields every field the
+  dictionary does not define whatever the headroom (`B-688-1`, `B-093-8`).
+
   *(Amended 2026-11-08, 100-wire-group-read-integrity:)* this invariant's "The C cursor shells are the exception" clause, and the table's
   rows for the typed `group<>()`, `fixpp_msg_get_group` and the C cursor shells, describe C-ABI 1.14.
   Since 100 (C-ABI 1.15) the typed `group<>()` reports the failure (`alloc_failed()` and
@@ -468,6 +473,10 @@ why", and "Golden / freeze".
 | 17 | #524: the reset unit is one store operation, run on an empty cancellation slot (plan OD-25, OD-26), and stopped by the engine-stop flag after `Engine::stop()`'s step 1 has run on the session's strand | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
 | 18 | `MessageView::unknown_fields()` returns an empty view on arena exhaustion instead of reaching `std::terminate` (fixpp#540) | `MessageView::unknown_fields()` (body only; still `noexcept`) | — (the C ABI does not expose it) | — | — | L-5 | behaviour, C++ only | none | Q-32 |
 
+*(Amended 2026-11-28, W1, `.specify/688-707-559-wire-headroom-token.md` D-688-1:)* row 18's behaviour is superseded: since W1
+`unknown_fields()` allocates nothing, so there is no exhaustion to report and no empty view to
+return (`B-688-1`); Q-32 now asserts every unknown field over the exhausted block.
+
 **Version.** One MINOR bump. Its `version.h` history entry is headed BREAKING, as 1.10's is, names
 rows 1 to 6 in one summary line each with a pointer to their declarations, and lists rows 7 and 8 as
 additions. By the placement rule it details an effect only where no declaration carries it; rows 1 to
@@ -497,7 +506,8 @@ delta carry the same BREAKING list.
   so the read succeeds and the spill is recorded. Its report is per API (C-3 I-5): `group_slices()` gives an empty span, indistinguishable from an absent group;
   `fixpp_msg_get_group` reports `FIXPP_ERR_TYPE_MISMATCH`; the nested getter reports
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; `unknown_fields()` gives an empty view, indistinguishable from a
-  frame with no unknown fields.
+  frame with no unknown fields. *(Amended 2026-11-28, W1, D-688-1:)* the `unknown_fields()` clause no
+  longer holds: since W1 it allocates nothing, so it has no exhaustion to report (`B-688-1`).
 - **L-6.** Before a Session exists, a connection on the acceptor is not observed. Its garbles are not
   counted, and its close is silent (no event, no log): no out-of-session log site exists in `src/`. A
   connection that yields a Session hands its first-frame garbles to it as one summary.

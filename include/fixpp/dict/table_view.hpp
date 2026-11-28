@@ -742,8 +742,12 @@ public:
     // defines `tag`. On a dictionary-built table that is a field the dictionary declares (its
     // merged field store, after any overlay), whether or not a message reaches it; on a
     // hand-built one, a tag some population operation named. A binary search over
-    // `defined_tags_`, which `table_view_builder::build() &&` writes in ascending order. Cold: the
-    // validator asks only after a tag failed the message's set. No allocation.
+    // `defined_tags_`, which `table_view_builder::build() &&` writes in ascending order. No
+    // allocation. Not cold for every reader: since W1
+    // (`.specify/688-707-559-wire-headroom-token.md` D-688-1, R-W1-3) the inbound parser's
+    // `unknown_fields()` asks it, through `dict_hooks::for_table_view`, for every non-framing entry
+    // it walks, at each construction of the view and each `++`. Re-derive the readers with
+    // `git grep -n 'tag_defined(' -- include src`.
     [[nodiscard]] bool tag_defined(std::uint16_t tag) const noexcept {
         return std::ranges::binary_search(defined_tags_, tag);
     }
@@ -771,9 +775,12 @@ public:
     // (src/dictionary/fixt_framing_table.hpp). Read ONLY by the validator's
     // Step-1 gate + type-check arm (validator.hpp) — deliberately NOT the
     // shared `valid_`/`types_` stores, so `field_valid_for`/`valid_tags_for`/
-    // `field_type_of` (and therefore the inbound parser's `unknown_fields()`
-    // classification) stay byte-identical whether strict validation is on or
-    // off (RC#1 / FR-009 / FR-010 load-bearing invariant).
+    // `field_type_of` stay byte-identical whether strict validation is on or
+    // off (RC#1 / FR-009 / FR-010 load-bearing invariant). Since W1
+    // (`.specify/688-707-559-wire-headroom-token.md` R-W1-3) the inbound parser's
+    // `unknown_fields()` classifies by `tag_defined`, not through these stores, so that
+    // reason narrows to the validator's own accessors; the invariant itself holds because
+    // the parser's table is built whatever the validation flag.
     [[nodiscard]] bool is_fixt_framing_tag(std::uint16_t tag) const noexcept {
         return fixt_framing_tags_.contains(tag);
     }

@@ -37,7 +37,9 @@
 // WHILE `table_view::is_fixt_framing_tag` (the mechanism the validator's
 // Step-1 gate consults) is TRUE for those same tags. A re-widening of the
 // shared `valid_` store inside `as_table_view()` flips `field_valid_for` to
-// true -> RED.
+// true -> RED. Since W1 (`.specify/688-707-559-wire-headroom-token.md` R-W1-3) the
+// parser's unknown_fields() classifies by tag_defined, not field_valid_for, so this
+// pin guards the validator's stores only, not the parser's classification.
 //
 // Anchors:
 //   research:   specs/081-strict-validation-residuals/research.md D-2, D-7

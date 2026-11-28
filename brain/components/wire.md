@@ -90,7 +90,7 @@ correctly on the first hop:
 | **Flyweight + caller-owned buffer** — views never own bytes; lifetime is the buffer's | owning views. Enforcement is *layered*, `[[clang::lifetimebound]]` being one layer, not the whole answer |
 | **Hybrid offset table** — eager through the typed dictionary surface, lazy on the raw iterator | picking one. The access *intent* differs: random-access wants the index built, streaming does not |
 | **Typed `group_view<T>` default, `.iter()` opt-out** | forcing group-index construction on streaming callers |
-| **Opaque round-trip for custom fields**, `unknown_fields()` as a filtered view | materialising a vector — which would allocate, violating `[const §VIII.5]` |
+| **Opaque round-trip for custom fields**, `unknown_fields()` as a filtered view ⚠️ built as specified only since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1): until then the parser materialised the list in the parse resource, and it classified by `field_valid_for`; as built the predicate is `table_view::tag_defined` (ruling R-W1-3), and the `MessageView` keeps one index, where the first unknown entry is (D-688-2) | materialising a vector — which would allocate, violating `[const §VIII.5]` |
 | **`BodyLength` + `CheckSum` verified BEFORE the parser sees a frame** | parsing first and validating after. A frame that fails the envelope check never reaches the parser at all |
 
 ## Repeating groups need a dictionary — and that is a hard boundary, not a soft one
@@ -426,6 +426,10 @@ The session now parses every inbound frame over its per-session buffer B(L) unde
   headroom large enough to make exhaustion impossible, which no number can be, since the C cursor
   shells allocate per call. The other lazy reads keep their reports (`L-093-5`), and the C cursor
   shells' missing catch is fixpp#541, outside 093 (`L-093-17`, OD-19).
+  ⚠️ **Superseded in part by W1** (`.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688):
+  the catch is gone because nothing allocates. `unknown_fields()` is the filtered view of
+  `[2b §4.8]`, so no resource state changes what it yields (`B-688-1`). OD-18's reasoning stays in
+  093's bundle as history; OD-18 did not weigh the non-allocating view.
 
 ⚠️ **Superseded in part by 100 (`100-wire-group-read-integrity`):** "every admitted frame parses" no
 longer holds for a frame crafted against the index seed, which now fails its parse at the per-build
@@ -481,13 +485,42 @@ decisions, each with what it rejected:
   100's research D5 and D11 are current.
 - `.specify/2b-wire.md` and 093's contract C-3 are amended in place for 100, so they are not flagged
   here.
+- ⚠️ **Superseded by W1 (`.specify/688-707-559-wire-headroom-token.md`)**, each frozen and not edited:
+  - `specs/004-wire-codec/contracts/unknown_fields.hpp`, the shape oracle's `[[clang::lifetimebound]]`
+    on `begin()` and `end()`: since D-688-1 the iterator holds its scan state by value, and the
+    attribute would reject the valid idiom. `include/fixpp/wire/unknown_fields.hpp` is current.
+  - `specs/004-wire-codec`'s writer-scratch records: contracts `writer.hpp` (the `scratch_mr`
+    constructor), the data-model's `Writer::scratch_mr` and its arena rows, the plan's three-arena
+    lines, research D-3, the tasks, and checklist `nfr.md` CHK001's three-arena model and CHK003's
+    writer-scratch arena. Since
+    D-559-1 the writer takes no scratch resource and allocates nothing; `include/fixpp/wire/writer.hpp`
+    and `.specify/2b-wire.md` §4.5, §6.6, §8 and seam 13 (amended in place) are current.
+  - 093's plan OD-18, as the record of the catch D-688-1 replaces, and 093's other records of the
+    empty view on exhaustion: spec FR-015, quickstart Q-32 and Q-33, research R-10, tasks, and
+    checklist `abi.md` CHK030; 100's plan, which cites that empty view as L-093-5's last bullet; and
+    `.specify/495-493-486-dict-reify-copy.md`'s mention of `unk_items_` among the parse containers.
+    Re-derive with `git grep -n -E 'empty view|unk_items_' -- specs/093-inbound-frame-dispositions
+    specs/100-wire-group-read-integrity .specify/495-493-486-dict-reify-copy.md`.
+  - 093's records of the value `kParseContainers` (plan, research, data-model, tasks, checklist
+    `nfr.md`): the count they quote included `MessageView`'s deleted `unk_items_`;
+    `src/session/parse_capacity.hpp`, re-derived by its recipe, is current.
+  - 081's texts that say the parser classifies through `field_valid_for`: FR-009 (`spec.md`); its
+    contract `validation-acceptance.md`, item 5 and the parser-containment pin; `research.md`'s
+    "Parser-unchanged" rationale; the data-model's load-bearing invariant; quickstart; tasks T006;
+    checklist `validation-correctness.md` CHK020. Re-derive with
+    `git grep -n -E 'field_valid_for|unknown_fields|inbound parser' -- specs/081-strict-validation-residuals`.
+    Since W1 the parser classifies by `tag_defined` (R-W1-3); the invariant itself, classification
+    identical with strict validation on or off, still holds because the parser's table is built
+    whatever the validation flag.
+  - 093's contract C-7 row 18, C-3 I-5 and C-8 L-5 are amended in place for W1, so they are not
+    flagged here.
 
 ## An undefined MsgType and an undefined tag have their own results (101, fixpp#653, #655)
 
 Design: `specs/101-inbound-reject-fidelity/research.md` D2 (with D1's store on [`dictionary.md`](./dictionary.md)); behaviour: B&L `B-101-1`, `B-101-6`. Read `dictionary_driven_validator::validate` in `include/fixpp/wire/validator.hpp` for the order.
 
 - **The MsgType check sits after Step 0 and before Step 1, on Step 1's own lookup.** `valid_tags_for(msg_type)` is taken once; `valid_tag_set_view::found()` says whether the table has the key, a miss is `wire_invalid_msg_type`, and Step 1 reuses the view, so the hot path keeps one `valid_.find` per message. A MsgType is defined exactly when some `add_valid(_tag)` or `add_required(_tag)` named it; re-derive the writers with `grep -n "valid_\[" include/fixpp/dict/table_view.hpp`.
-- **A tag outside the message's set is split by the dictionary.** `table_view::tag_defined()` answers whether the table's dictionary defines it: `wire_undefined_tag` when not, `wire_unexpected_tag` when it does. The lookup is cold, asked only after the set test failed.
+- **A tag outside the message's set is split by the dictionary.** `table_view::tag_defined()` answers whether the table's dictionary defines it: `wire_undefined_tag` when not, `wire_unexpected_tag` when it does. The lookup is cold, asked only after the set test failed. ⚠️ Since W1 (`.specify/688-707-559-wire-headroom-token.md` R-W1-3) it has a second reader, `unknown_fields()`, which asks for every non-framing entry it walks, so it is not cold for that reader.
 - **No group-specific code.** Step 1 walks the frame flat, against a set that includes group members, so an undefined tag in a group instance at any depth gets the same answer; QuickFIX C++'s layout-dependent answers are disclosed, not copied (`B-101-6`).
 - **Two new `core::error` slots, mapped to the existing C conformance code**, so the C code set does not move. Their 373 values are in the seam below, which does not reproduce them.
 - **Rejected:** reusing `wire_invalid_tag_number` for an undefined tag (owner ruling: it keeps its contract, a malformed tag with no 371); querying the `Dictionary` at validate time (the validator holds a `table_view`).

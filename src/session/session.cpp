@@ -3118,7 +3118,7 @@ struct SendingTimeStamp {
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored,
     std::string_view resend_sending_time, fixpp::wire::dict_hooks const& hooks) noexcept {
-    fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
+    fixpp::wire::Writer w(out);
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     const std::size_t n = stored.size();

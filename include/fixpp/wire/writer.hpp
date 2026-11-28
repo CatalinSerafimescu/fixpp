@@ -9,14 +9,16 @@
 //   specs/004-wire-codec/contracts/writer.hpp
 //
 // Design summary:
-//   - Writer(dst, scratch_mr): aliases dst; scratch_mr for group bookkeeping.
+//   - Writer(dst): aliases dst. The writer keeps no group bookkeeping (open_group writes the
+//     count up front, and closing a group writes nothing), so it takes no scratch resource
+//     (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1, fixpp#559).
 //   - append_raw(tag, value_bytes): write "tag=value\x01" into dst.
 //   - append<T>(tag, v): delegate to the field's trait to_chars into dst.
 //   - open_group(no_tag, count): write "no_tag=count\x01", return group_writer.
 //   - commit() &&: backpatch digit-only 9=N and append 10=NNN\x01.
 //   - bytes_written(): bytes consumed so far (before commit).
 //
-// Zero-allocation for group-free messages (no heap between append and commit).
+// Zero-allocation: the writer writes into dst and allocates nothing, with or without groups.
 // (C1) every potentially-throwing trait call is fenced by core::detail::trap_throw
 //      so no exception escapes the noexcept boundary (FR-013, [arch §5.3]).
 
@@ -26,7 +28,6 @@
 #include <expected>                        // std::unexpect
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
-#include <memory_resource>
 #include <span>
 
 namespace fixpp::wire {
@@ -35,10 +36,17 @@ class Writer;
 
 // Passkey token: only Writer can create a group_writer_token, ensuring
 // group_writer is only constructed through Writer::open_group.
+// W1 (`.specify/688-707-559-wire-headroom-token.md` D-707-1, fixpp#707): the copy constructor
+// is user-provided and private, so the token is not trivially copyable (std::bit_cast cannot
+// make one) and only Writer can pass one. Re-derive with the static_asserts in
+// tests/wire/type_shape_pins_test.cpp.
 struct group_writer_token {
 private:
     friend class Writer;
     group_writer_token() noexcept = default;
+    // A defaulted copy constructor is trivial, so the token would be bit_cast-able again.
+    // NOLINTNEXTLINE(modernize-use-equals-default,hicpp-use-equals-default)
+    group_writer_token(group_writer_token const& /*other*/) noexcept {}
 };
 
 // ── group_writer ──────────────────────────────────────────────────────────────
@@ -82,10 +90,8 @@ private:
 // ── Writer ────────────────────────────────────────────────────────────────────
 class Writer {
 public:
-    // Alias dst (caller-owned buffer); capture scratch_mr for group bookkeeping.
-    // Both must outlive the Writer.
-    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]],
-                    std::pmr::memory_resource* scratch_mr [[clang::lifetimebound]]) noexcept;
+    // Alias dst (caller-owned buffer), which must outlive the Writer.
+    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]]) noexcept;
 
     // Raw bytes append: writes "tag=value\x01" into dst.
     // Returns wire_field_value_truncated if dst is too small (no OOB write).
@@ -99,6 +105,11 @@ public:
 
     // Repeating-group: write "no_tag=count\x01" and return a group_writer that
     // aliases *this. Nesting must close in LIFO order (last opened, first closed).
+    // The group_writer is built in Writer's scope and moved into the result, because the
+    // token's copy constructor is private to Writer (std::in_place would copy it inside the
+    // standard library). The moved-from temporary still holds this owner when it is destroyed,
+    // so its destructor runs close_impl() once more: harmless while close_impl() writes nothing,
+    // and a close_impl() that writes must first make a moved-from group_writer inert.
     [[nodiscard]] core::expected_t<group_writer> open_group(std::uint16_t no_tag,
                                                             std::uint32_t count) noexcept
         [[clang::lifetimebound]];
@@ -138,9 +149,6 @@ private:
     std::size_t bl_digit_count_ = 0;
     // Position of the first placeholder digit (inside the "9=NNN..." field).
     std::size_t bl_digit_pos_ = npos;
-
-    // Scratch memory resource for group bookkeeping (group_writer state).
-    [[maybe_unused]] std::pmr::memory_resource* scratch_mr_ = nullptr;  // see fixpp#559
 
     // Track whether we've hit a buffer-full error during appends.
     bool overflow_ = false;

@@ -19,7 +19,6 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>
 #include <fixpp/wire/writer.hpp>
-#include <memory_resource>
 #include <span>
 #include <utility>
 
@@ -107,8 +106,7 @@ constexpr std::byte EQ_BYTE{static_cast<std::byte>('=')};
 }  // namespace
 
 // ── Writer constructor ────────────────────────────────────────────────────────
-Writer::Writer(std::span<std::byte> dst, std::pmr::memory_resource* scratch_mr) noexcept
-    : dst_{dst}, scratch_mr_{scratch_mr} {}
+Writer::Writer(std::span<std::byte> dst) noexcept : dst_{dst} {}
 
 // ── Writer::write_byte ────────────────────────────────────────────────────────
 bool Writer::write_byte(std::byte b) noexcept {
@@ -230,7 +228,9 @@ core::expected_t<group_writer> Writer::open_group(std::uint16_t no_tag,
     if (!rc) {
         return core::expected_t<group_writer>{std::unexpect, rc.error()};
     }
-    return core::expected_t<group_writer>{std::in_place, group_writer_token{}, this};
+    // W1 D-707-1: built here, where the token's private copy constructor is reachable, and moved
+    // into the result (writer.hpp's open_group comment states the moved-from condition).
+    return core::expected_t<group_writer>{group_writer{group_writer_token{}, this}};
 }
 
 // ── Writer::commit ────────────────────────────────────────────────────────────

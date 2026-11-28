@@ -63,6 +63,7 @@ add_wire_test(wire_pure_tests
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
   nested_group_slices_failloud_test.cpp                               # T001 (073)
   framer_resync_test.cpp                                              # T015 (093)
+  type_shape_pins_test.cpp                                            # W1 (fixpp#559, #707, #688)
 )
 # nested_group_slices_failloud_test.cpp (T001) reaches the
 # offset_table_test_access friend seam through tests/support/wire_test_hooks.hpp.
@@ -140,7 +141,8 @@ add_executable(wire_dict_tests
   test_099_validator_envelope.cpp                                     # 099 T026 (W-3, unit half)
   test_101_validator_reasons.cpp                                      # 101 T008 (W101-6, 7, 14)
   test_100_group_read_status.cpp                                      # 100 T015
-  test_100_typed_reads.cpp)                                           # 100 T016/T017
+  test_100_typed_reads.cpp                                            # 100 T016/T017
+  unknown_fields_dict_test.cpp)                                       # W1 (fixpp#688, R-W1-3)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary

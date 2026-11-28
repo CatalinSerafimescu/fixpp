@@ -32,7 +32,8 @@ SeqnumDrainOnClose.HolderAtDestructionTerminates    NDEBUG only. The async_mutex
 WireLifetimeTrapDeath.StaleGenerationAborts    NDEBUG only. Debug-only generation-token trap; release strips the token entirely, witnessed by the else-branch cell WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery in the same file.
 WireLifetimeTrap.UntrackedPoolNeverTraps    NDEBUG only. Asserts pool_id 0 does NOT trap — meaningless in release where no token exists. Release side covered by WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery.
 WireLifetimeTrapDeath.ParserViewTrapsAfterArenaRecycle    NDEBUG only. Debug-only trap on arena recycle; release has no token to stale. Release side covered by WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery.
-WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery    NDEBUG-ELSE branch: this is the RELEASE-ONLY counterpart to the three cells above. Not a coverage hole — it is what makes the pair complete.
+WireLifetimeTrapDeath.UnknownFieldsIteratorTrapsAfterArenaRecycle    NDEBUG only. Debug-only trap on the unknown-field iterator's operator* and operator++ after an arena recycle; release has no token to stale, so the iterator has no generation to check. Release side covered by WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery.
+WireLifetimeTrap.ReleaseStripsTokenNoTrapMachinery    NDEBUG-ELSE branch: this is the RELEASE-ONLY counterpart to every NDEBUG-gated trap cell of tests/wire/lifetime_trap_test.cpp. Not a coverage hole — it is what makes the pair complete.
 
 WireView.StaleGenerationTrapsInDebug    NDEBUG only. Debug-only generation-token trap. No release-side runtime counterpart exists in this file BY CONSTRUCTION: in release the token is not a member, so there is nothing to stale. The release half is held by the `#ifdef NDEBUG` static_assert at the top of the file, which pins sizeof(View) == {ptr, len}.
 

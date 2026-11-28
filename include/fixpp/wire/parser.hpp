@@ -30,7 +30,6 @@
 #include <fixpp/core/decimal_alias.hpp>    // fixpp::decimal_t (2a/001 trait)
 #include <fixpp/core/decimal_helpers.hpp>  // core::detail::trap_throw (C1)
 #include <fixpp/core/error.hpp>
-#include <fixpp/core/pmr_arena_upstream.hpp>  // detail::arena_upstream (MSVC-debug proxy)
 // 066-dict-backed-inbound-parse T003: MessageView::membership_copy() (below)
 // returns an OWNED table_view by value, needing it complete. table_view.hpp
 // has a deliberately minimal include graph (no mutex, no heavy asio — see
@@ -41,9 +40,9 @@
 // pitfall note at membership_copy()'s out-of-line definition.
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/version_profile.hpp>  // 099: resolved_application_version()
+#include <limits>
 #include <memory>
 #include <memory_resource>
-#include <new>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -94,6 +93,42 @@ struct message_view_membership_access;
 // Writes MessageView's resolved application version (defined below).
 struct message_view_resolved_access;
 
+// W1 D-688-2 (`.specify/688-707-559-wire-headroom-token.md` §1.4a, ruling R-W1-6): the encoding of
+// MessageView<Index>'s first-unknown index. The sentinel is "not computed yet"; a stored value v
+// with v <= entries().size() is computed, v < size being the first unknown entry's index and
+// v == size "none" (the end index next_unknown returns when it finds nothing).
+inline constexpr std::uint32_t kFirstUnknownNotComputed = std::numeric_limits<std::uint32_t>::max();
+
+// Read: whether v is a computed index for a table of `size` entries. The != half keeps the
+// sentinel from reading as an index on a table of that many entries or more; the <= half makes a
+// moved-from view, whose table no longer holds the entries its index counted, rescan.
+[[nodiscard]] constexpr bool first_unknown_is_set(std::uint32_t v, std::size_t size) noexcept {
+    return v != kFirstUnknownNotComputed && v <= size;
+}
+
+// Store: whether a found index is representable. One that is not is never stored, so the
+// sentinel stays and that view rescans on every call.
+[[nodiscard]] constexpr bool first_unknown_fits(std::size_t idx) noexcept {
+    return idx < kFirstUnknownNotComputed;
+}
+
+// Where std::size_t is 32-bit the first sum wraps to 0 and this witness holds either way.
+static_assert(!first_unknown_is_set(kFirstUnknownNotComputed,
+                                    std::size_t{kFirstUnknownNotComputed} + 1U));
+static_assert(!first_unknown_fits(kFirstUnknownNotComputed));
+static_assert(first_unknown_fits(kFirstUnknownNotComputed - 1U));
+static_assert(first_unknown_is_set(3, 3));
+static_assert(!first_unknown_is_set(4, 3));
+
+// The store: writes idx into slot when first_unknown_fits(idx), and otherwise leaves slot as it
+// is. unknown_fields() stores its found index through this, so the refusal can be run on an index
+// past the slot's range without building a table that large.
+constexpr void remember_first_unknown(std::uint32_t& slot, std::size_t idx) noexcept {
+    if (first_unknown_fits(idx)) {
+        slot = static_cast<std::uint32_t>(idx);
+    }
+}
+
 }  // namespace detail
 
 template <access_mode Mode>
@@ -138,8 +173,7 @@ public:
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr, hooks},
           mr_{mr},
-          hooks_{hooks},
-          unk_items_{mr} {
+          hooks_{hooks} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
         // below. Every root group read, whichever entry point makes it, must
@@ -172,8 +206,7 @@ private:
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr, cfg, hooks, reserve_entries},
           mr_{mr},
-          hooks_{hooks},
-          unk_items_{mr} {
+          hooks_{hooks} {
         // The same root group_context seed as the public dict-aware ctors.
         table_.set_group_context(group_context{.msg_type = msg_type()});
     }
@@ -184,8 +217,7 @@ public:
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
           table_{frame, mr},
-          mr_{mr},
-          unk_items_{mr} {}
+          mr_{mr} {}
 
     explicit MessageView(frame_view const& frame) noexcept
         requires(Mode == access_mode::Iter)
@@ -381,53 +413,42 @@ public:
 
     // [2b §4.8] Contract: unknown_fields() uses the dict pointer threaded from the
     // Parser that constructed this MessageView — no caller-supplied argument.
-    // Walks the offset table and yields entries whose tag is not `field_valid_for`-
-    // known in the dict, exempting framing tags 8/9/10. Builds and caches the kv
-    // list in the per-message arena (mr_) on first call; idempotent.
     // ([PR68-02] fix — the dict is captured at Parser construction time.)
-    // When dict_ptr_ is null (default/dict-free construction), no tag is classified
-    // as known so all non-framing tags are yielded as unknown.
+    // W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688): the filtered view
+    // of [2b §4.8]. It walks the offset table's entries as it is iterated and yields each one the
+    // dictionary does not define (the classify hook, table_view::tag_defined since ruling
+    // R-W1-3), framing tags 8/9/10 exempt. It allocates nothing, so no state of the parse resource
+    // changes what it yields (it supersedes 093's catch, FR-015, which returned an empty view on
+    // exhaustion). The view stores no list; this MessageView stores one index, where the first
+    // unknown entry is: the first call over a non-empty table stores the index when it is
+    // representable; otherwise it leaves the sentinel and rescans, and later calls start at a
+    // stored index (D-688-2). With no classify hook (dict-free construction) every non-framing
+    // tag is unknown. The view copies its context out of this MessageView, not a pointer to it;
+    // the dictionary must outlive every iteration.
     [[nodiscard]] unknown_fields_view unknown_fields() const noexcept
         [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-            if (unk_items_built_) {
+            check_alive();  // [2b §6.4]: building the view reads the table and the frame
+            auto const ents = table_.entries();
+            unknown_fields_view::entry const* const begin = ents.data();
+            unknown_fields_view::entry const* const end = begin + ents.size();
+            // The guard comes before the empty-table rule, so a moved-from view reads its stale
+            // index through the guard (first_unknown_'s comment).
+            if (detail::first_unknown_is_set(first_unknown_, ents.size())) {
                 return unknown_fields_view{
-                    std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
-                    token()};
+                    unknown_fields_view::scan_state{.end = end,
+                                                    .base = data_ptr(),
+                                                    .classify = hooks().classify_fn(),
+                                                    .dict = hooks().opaque_dict(),
+                                                    .msg_type = msg_type()},
+                    begin + first_unknown_, token()};
             }
-            unk_items_built_ = true;
-            std::string_view const mtype = msg_type();
-            auto const raw = bytes();
-            // Framing tags 8/9/10 are always exempt from unknown classification.
-            constexpr std::uint16_t kBeginString = 8;
-            constexpr std::uint16_t kBodyLength = 9;
-            constexpr std::uint16_t kCheckSum = 10;
-            // 093-inbound-frame-dispositions (FR-015, fixpp#540): the list grows in the
-            // view's parse resource, whose upstream may refuse (null_memory_resource). A
-            // bad_alloc here used to leave this noexcept function: std::terminate. On
-            // exhaustion the partial list is cleared and the built flag stays set, so this
-            // call and every later one return the same empty view, which cannot be told
-            // from a frame with no unknown fields (contract L-5).
-            try {
-                for (auto const& e : table_.entries()) {
-                    if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
-                        continue;  // framing — never unknown
-                    }
-                    // hooks_.classify_fn() is nullptr for dict-free views (all
-                    // non-framing = unknown); otherwise classify via the bound
-                    // fn + opaque dict.
-                    bool const known = (hooks().classify_fn() != nullptr) &&
-                                       hooks().classify_fn()(hooks().opaque_dict(), mtype, e.tag);
-                    if (!known) {
-                        unk_items_.push_back(unknown_fields_view::kv{
-                            .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
-                    }
-                }
-            } catch (std::bad_alloc const&) {
-                unk_items_.clear();
+            auto const v = unknown_fields_view::scan(begin, end, data_ptr(), hooks().classify_fn(),
+                                                     hooks().opaque_dict(), msg_type(), token());
+            if (!ents.empty()) {  // nothing is written over an empty table
+                detail::remember_first_unknown(first_unknown_,
+                                               static_cast<std::size_t>(v.first_ - begin));
             }
-            return unknown_fields_view{
-                std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
-                token()};
+            return v;
         }
 
     // ⚠️ Superseded at both copy sites by shared_membership() below (fixpp#495,
@@ -544,8 +565,7 @@ private:
     struct empty_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, OffsetTable, empty_t>
         table_{};
-    // Index-mode extras. mr_ declared BEFORE unk_items_ so it is initialised
-    // first.
+    // Index-mode extras.
     std::pmr::memory_resource* mr_ = std::pmr::null_memory_resource();
     // [2b §4.3] / [2b §4.8] fixpp#426: the dict_hooks bundle threaded from the
     // Parser (replaces the separate opaque_dict_/classify_fn_/
@@ -566,23 +586,44 @@ private:
         }
     }
     hooks_holder_t hooks_{no_hooks()};
-    // unk_items_: lazily built unknown-fields kv list in the per-message arena.
-    // An Index-mode ctor overrides this default with the real arena
-    // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
-    // fall through to this initializer. The default backing is arena_upstream()
-    // (null on release/Linux, new_delete under MSVC debug): MSVC's debug STL
-    // heap-allocates a _Container_proxy for this vector AT CONSTRUCTION, and
-    // null_memory_resource would throw bad_alloc there -> noexcept ctor ->
-    // std::terminate (a silent Windows-debug abort). unk_items_ is only ever
-    // *built* on the Index-mode unknown-fields path (which threads the real
-    // arena), so behaviour is unchanged on every lane.
-    mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{::fixpp::detail::arena_upstream()};
-    mutable bool unk_items_built_ = false;
     // 099 (data-model E-5): Index mode only, as `dict_owner_` is, so an Iter view stores nothing.
     struct no_resolved_version_t {};
     [[no_unique_address]] std::conditional_t<Mode == access_mode::Index,
                                              fixpp::dict::application_version,
                                              no_resolved_version_t> resolved_application_version_{};
+    // W1 D-688-2 (`.specify/688-707-559-wire-headroom-token.md` §1.4a, ruling R-W1-6): where the
+    // first unknown entry is, as an index into table_.entries(), so a later unknown_fields() call
+    // starts there instead of rescanning. Index mode only; an Iter view carries an empty member
+    // whose type must stay distinct from the other empty members' types, because two
+    // [[no_unique_address]] members of one empty type cannot share an address.
+    //   - The encoding is detail::kFirstUnknownNotComputed ("not computed yet") or a computed
+    //     index, "none" being the end index. detail::first_unknown_is_set reads it: its != half
+    //     keeps the sentinel from reading as an index, its <= size half makes a moved-from view
+    //     (which keeps the index but not the entries) rescan. detail::remember_first_unknown
+    //     stores it, bounded by detail::first_unknown_fits: an index that is not representable
+    //     is not stored, and that view rescans.
+    //   - unknown_fields() tests the guard before its empty-table rule, so a moved-from view's
+    //     stale index is read through the guard. It never writes the index over an empty table:
+    //     owning_message_handle::view() returns one shared empty view on every thread.
+    //   - The first call over a non-empty table stores the index when it is representable;
+    //     otherwise it leaves the sentinel and rescans. A store is a write to a const view, under
+    //     [2b §6.6]'s contract: one view, one thread at a time, as group<>()'s context writes are.
+    //   - Declared right after resolved_application_version_ so that it falls in the padding
+    //     before dict_owner_; re-derive with `-Xclang -fdump-record-layouts-complete` (clang) or
+    //     `/d1reportSingleClassLayoutMessageView` (MSVC).
+    //   - The initializer is mode-dependent (not_computed()), as hooks_'s is: {} would read as
+    //     "computed, at index 0".
+    struct no_first_unknown_t {};
+    using first_unknown_t =
+        std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_first_unknown_t>;
+    static constexpr first_unknown_t not_computed() noexcept {
+        if constexpr (Mode == access_mode::Index) {
+            return detail::kFirstUnknownNotComputed;
+        } else {
+            return no_first_unknown_t{};
+        }
+    }
+    [[no_unique_address]] mutable first_unknown_t first_unknown_{not_computed()};
     // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.1): the owner object
     // of the table in `hooks_` when this view came from Parser's owned route, else
     // nullptr. A BORROWED pointer to the shared_ptr object, not a shared_ptr: no
@@ -797,8 +838,12 @@ struct message_view_resolved_access {
 inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict) noexcept {
     return dict_hooks{
         std::addressof(dict),
-        [](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
-            return static_cast<fixpp::dict::table_view const*>(d)->field_valid_for(mt, t);
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` ruling R-W1-3): "known" is "the
+        // dictionary defines the tag", as [2b §4.8] specifies, not "this MsgType declares it";
+        // a defined tag the MsgType does not declare is the validator's wire_unexpected_tag.
+        // The MsgType parameter stays in classify_fn_t and is unused here.
+        [](void const* d, std::string_view /*mt*/, std::uint16_t t) noexcept -> bool {
+            return static_cast<fixpp::dict::table_view const*>(d)->tag_defined(t);
         },
         // 063 T015: resolves via the stored `group_context` (msg_type +
         // bounded parent-no_tag path) — the context-scoped membership key

@@ -22,7 +22,6 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/writer.hpp>
 #include <map>
-#include <memory_resource>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -291,7 +290,7 @@ inline std::string fix_type_for_tag(int tag) {
     auto sv_to_bytes = [](std::string_view sv) {
         return std::span<std::byte const>(reinterpret_cast<std::byte const*>(sv.data()), sv.size());
     };
-    fixpp::wire::Writer w(out, std::pmr::get_default_resource());
+    fixpp::wire::Writer w(out);
     if (auto r = w.append_raw(8, sv_to_bytes(begin_string)); !r) return std::unexpected(r.error());
     if (auto r = w.append_raw(35, sv_to_bytes(msg_type)); !r) return std::unexpected(r.error());
     {

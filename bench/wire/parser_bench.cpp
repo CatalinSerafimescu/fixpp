@@ -20,6 +20,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
@@ -144,5 +147,119 @@ static void BM_Parser_Index_200tag(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_Parser_Index_200tag);
+
+// ── W1: unknown_fields() (`.specify/688-707-559-wire-headroom-token.md` §1.4) ──────────────
+// The shapes where the filtered view of D-688-1 can cost more than the list it replaces, plus
+// the single pass beside them. They run over a table loaded from dictionaries/FIX44.xml, so a
+// tag is known in both the merge base's classification (declared for NewOrderSingle) and the
+// W1 one (defined by the dictionary). They use only unknown_fields(), begin(), end(), empty()
+// and a range-for binding auto const&, so this file builds on the merge base too and the same
+// source can run there (the transplanted A-B-A-B run). Each case first checks that the frame
+// yields the unknown count it is named for, and stops with an error otherwise, so the two
+// trees time the same shape.
+namespace {
+
+[[nodiscard]] fixpp::dict::table_view const& fix44_table() {
+    static std::pmr::monotonic_buffer_resource dict_mr;
+    static fixpp::dict::Dictionary const dict = fixpp::dict::XmlLoader{}.load(
+        std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml", &dict_mr);
+    static fixpp::dict::table_view const tv = dict.as_table_view();
+    return tv;
+}
+
+constexpr std::size_t kTrailingUnknowns = 3;
+const std::vector<std::byte> kKnownThenUnknownFrame =
+    build_frame(k20TagBody + "5000=U0\x01" + "5001=U1\x01" + "5002=U2\x01");
+const frame_view kKnownThenUnknownFv = make_fv(kKnownThenUnknownFrame);
+
+[[nodiscard]] std::size_t count_unknown(MessageView<access_mode::Index> const& mv) {
+    std::size_t n = 0;
+    for (auto const& kv : mv.unknown_fields()) {
+        std::uint16_t tag = kv.tag;
+        benchmark::DoNotOptimize(tag);
+        ++n;
+    }
+    return n;
+}
+
+}  // namespace
+
+// One pass per fresh parse: the parse, then one full iteration of unknown_fields().
+static void BM_UnknownFields_SinglePassAfterParse(benchmark::State& state) {
+    Parser<access_mode::Index> p{fix44_table()};
+    std::array<std::byte, 32 * 1024> arena_buf{};
+    for (auto _ : state) {
+        std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                                  std::pmr::null_memory_resource()};
+        auto r = p.parse(kKnownThenUnknownFv, &arena);
+        if (!r || count_unknown(*r) != kTrailingUnknowns) {
+            state.SkipWithError("the frame does not yield its trailing unknown fields");
+            break;
+        }
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_UnknownFields_SinglePassAfterParse);
+
+// Repeated unknown_fields() calls and full iterations on one parsed message.
+static void BM_UnknownFields_RepeatedCalls(benchmark::State& state) {
+    Parser<access_mode::Index> p{fix44_table()};
+    std::array<std::byte, 32 * 1024> arena_buf{};
+    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    auto r = p.parse(kKnownThenUnknownFv, &arena);
+    if (!r || count_unknown(*r) != kTrailingUnknowns) {
+        state.SkipWithError("the frame does not yield its trailing unknown fields");
+        return;
+    }
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(count_unknown(*r));
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_UnknownFields_RepeatedCalls);
+
+// Repeated full iterations of one view, built once.
+static void BM_UnknownFields_RepeatedIterationOfOneView(benchmark::State& state) {
+    Parser<access_mode::Index> p{fix44_table()};
+    std::array<std::byte, 32 * 1024> arena_buf{};
+    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    auto r = p.parse(kKnownThenUnknownFv, &arena);
+    if (!r || count_unknown(*r) != kTrailingUnknowns) {
+        state.SkipWithError("the frame does not yield its trailing unknown fields");
+        return;
+    }
+    auto const uf = r->unknown_fields();
+    for (auto _ : state) {
+        std::size_t n = 0;
+        for (auto const& kv : uf) {
+            std::uint16_t tag = kv.tag;
+            benchmark::DoNotOptimize(tag);
+            ++n;
+        }
+        benchmark::DoNotOptimize(n);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_UnknownFields_RepeatedIterationOfOneView);
+
+// empty() on a frame with no unknown field, called repeatedly on one parsed message.
+static void BM_UnknownFields_EmptyOnFrameWithNone(benchmark::State& state) {
+    Parser<access_mode::Index> p{fix44_table()};
+    std::array<std::byte, 32 * 1024> arena_buf{};
+    std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
+                                              std::pmr::null_memory_resource()};
+    auto r = p.parse(k20TagFv, &arena);
+    if (!r || count_unknown(*r) != 0U) {
+        state.SkipWithError("the 20-tag frame is expected to have no unknown field");
+        return;
+    }
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(r->unknown_fields().empty());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_UnknownFields_EmptyOnFrameWithNone);
 
 BENCHMARK_MAIN();

@@ -378,6 +378,8 @@ Memory shape (occurrence-keyed, per §1.2):
 
 ### 4.5 `Writer` — serializer
 
+Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1, fixpp#559): the constructor took a `scratch_mr` for group bookkeeping that was never built: `open_group` writes the count up front and closing a group writes nothing. `Writer` is constructed from its destination alone and allocates nothing, with or without groups; the signature below is as built.
+
 ```cpp
 // include/fixpp/wire/writer.hpp
 namespace fixpp::wire {
@@ -385,13 +387,8 @@ namespace fixpp::wire {
 class Writer {
 public:
     // dst is the caller-supplied output buffer (typically session's send arena).
-    // scratch_mr is a per-message arena used for group_writer bookkeeping
-    // (open-group entry-count tracking + offset list for backpatch at close);
-    // Writer itself does not allocate beyond what the group bookkeeping costs.
-    // Writer aliases dst and captures scratch_mr; both must outlive the Writer.
-    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]],
-                    std::pmr::memory_resource* scratch_mr
-                                            [[clang::lifetimebound]]) noexcept;
+    // Writer aliases dst, which must outlive the Writer; it allocates nothing.
+    explicit Writer(std::span<std::byte> dst [[clang::lifetimebound]]) noexcept;
 
     // Type-erased append; the typed overloads below are the normal callers.
     [[nodiscard]] expected_t<void>
@@ -563,6 +560,8 @@ public:
 }  // namespace fixpp::wire
 ```
 
+Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688, ruling R-W1-3): as built since W1. Until W1 the parser materialised the list in the parse resource and classified by `field_valid_for(msg_type, tag)`; it now walks the offset table as it is iterated and classifies by `table_view::tag_defined`, the "not declared by the dictionary at all" above. `begin()` and `end()` carry no `[[clang::lifetimebound]]`: the iterator holds its scan state by value and points at the `MessageView`'s parse storage, not at the view, so an iterator taken from a temporary view is valid while the `MessageView` lives, and the attribute would make clang reject that idiom (`-Wdangling`). The iterator's `operator*` returns the (tag, value) pair by value, because a reference into the iterator's own state would dangle across `++`. `MessageView<Index>` remembers where the first unknown entry is, so a later `unknown_fields()` call does not rescan the frame (D-688-2).
+
 Round-trip preservation: when a `Writer` echoes a parsed message (e.g., for resend on the session-FSM gap-fill path), it must walk both the typed fields *and* the unknown-fields view, preserving the original byte order. The merge is in-place two-pointer (both streams are offset-keyed and pre-sorted by stream position), so the merge buffer cost is zero — no allocation. The session FSM and the message store use **raw-frame storage** (per 2a §7.1 v0.3, confirmed at **2e**), so true byte-identical round-trip is the store's responsibility, not the writer's; the writer's job is structural fidelity for messages that *originate* in our process.
 
 ## 5. C ABI surface — none (delegated to 2i)
@@ -620,7 +619,7 @@ The Phase 2 measurement spike (§10 Q1) confirms the eager-mode footprint on a r
 
 - Every `View`-derived type (`MessageView`, `frame_view`, `field_view`, `group_view`, `unknown_fields_view`, `OffsetTable::entry`) is a flyweight over the originating `frame_view`'s buffer. Outliving that buffer is undefined behavior in release; debug builds trap.
 - `[[clang::lifetimebound]]` annotations cover every constructor and view-returning member. Best-effort warnings on Clang and partial GCC; ignored on MSVC `[const §IX.4]`.
-- Debug builds wire `detail::generation_token` into each `View` and trap inside `View::check_alive()` (called from every accessor) when the originating buffer pool's generation has rotated past the view's token. Debug-only — release strips the token entirely (`[[no_unique_address]]` empty member).
+- Debug builds wire `detail::generation_token` into each `View` and trap inside `View::check_alive()` (called from every accessor) when the originating buffer pool's generation has rotated past the view's token. Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-688-1): as built for the unknown-field view, `MessageView::unknown_fields()` checks before its scan, and the iterator's `operator*` and `operator++` check the token the view was built with; the view's `begin()`, `end()` and `empty()` read no frame memory after construction and do not check. Debug-only — release strips the token entirely (`[[no_unique_address]]` empty member).
 - Buffer pool generations rotate when a session arena resets between message batches `[arch §5.2]`. The session FSM ensures rotation happens *after* `fromApp` returns; user code that captures a `MessageView` past `fromApp` and accesses it later will trap in debug, UB in release. Documented as the *one* user-facing footgun of the flyweight contract — see `2c §7.x` for codegen's mitigation (typed messages own no view past their constructor).
 
 ### 6.5 Validation
@@ -640,19 +639,20 @@ Updated (099-fixt-appl-version-validation): `dictionary_driven_validator` gains 
 
 ### 6.6 Allocation, exceptions, threading
 
-#### Arenas — three lifetime classes, pinned
+#### Arenas — two lifetime classes, pinned
+
+Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1): a third, the writer-scratch arena, was listed here; the writer never allocated from it, and its constructor no longer takes one. What remains is two arenas plus the validator's caller-supplied scratch.
 
 - **Per-message arena** (`SessionConfig::message_arena`, `[arch §5.2]`) — reset by the session FSM after `fromApp` returns. Holds: the `OffsetTable` `entry[]` array, the open-addressing hash overlay, the group sub-indices built lazily by `OffsetTable::group()`, the validator's `seen[]` bitmap and `required_remaining` set. *Lifetime is one inbound message.*
 - **Framer carry arena** (`SessionConfig::framer_carry_arena`) — session lifetime, NOT per-message. Holds: the `pmr_carry_buffer`, sized at construction to `Config::max_frame_bytes + small constant`. *Lifetime is the session.* Carry by definition spans messages, so a per-message-reset arena would invalidate the carry between calls. v0.1 documented carry as living in the per-message arena; v0.2 corrects this — carry MUST live in `framer_carry_arena`. Per Opus adversarial NEW P1.
-- **Writer scratch arena** (passed to `Writer` constructor; typically the same per-message arena since outbound write happens within one fromApp/toApp turn) — holds: the `group_writer` open-group bookkeeping (count + per-entry offset list for backpatch at `close()`). *Lifetime is one outbound message-build turn.*
 
 #### Allocation budget (zero-`new`/`delete` enforcement)
 
-- **Zero `new`/`delete`** between parse and `fromApp` `[const §VIII.5]`. The three arenas above absorb every wire-layer allocation; the global heap is never touched on the hot path. `tools/check_alloc.py` (§9 seam #10) verifies under `mallocnesia` on Linux/Clang Tier 1.
+- **Zero `new`/`delete`** between parse and `fromApp` `[const §VIII.5]`. The two arenas above, and the validator's caller-supplied scratch, absorb every wire-layer allocation; the global heap is never touched on the hot path. `tools/check_alloc.py` (§9 seam #10) verifies under `mallocnesia` on Linux/Clang Tier 1.
 - **Iter mode** is zero-allocation end-to-end (no offset table; no validator; no writer in the typical Iter consumer path).
 - **Index mode** allocates from the per-message arena only; bounded by §1.2 caps.
 - **Validator** allocates ~600 B worst-case from the scratch arena passed to `validate()` (§6.5 detail).
-- **Writer** allocates `group_writer` bookkeeping from `Writer::scratch_mr` (§4.5); for messages without repeating groups, allocation is zero.
+- **Writer** allocates nothing (§4.5).
 
 #### Exceptions
 
@@ -756,13 +756,12 @@ The tap consumer reads `frame_view::bytes()` from the parser hand-off, ring-buff
 
 ## 8. PMR — recap
 
-Three arenas with three lifetime classes (canonical reference; see §6.6 for the discussion):
+Two arenas with two lifetime classes, plus the validator's caller-supplied scratch (canonical reference; see §6.6 for the discussion). Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1): the `Writer::scratch_mr` row is gone, and so is the writer group-bookkeeping the message arena was said to hold; the writer allocates nothing.
 
 | Arena | Lifetime | Holds | Reset by |
 |---|---|---|---|
-| `SessionConfig::message_arena` | per-message (reset after `fromApp`) | `OffsetTable::entry[]`, hash overlay, group sub-indices, validator scratch (`seen[]` + `required_remaining`), writer group-bookkeeping | session FSM after `fromApp` returns |
+| `SessionConfig::message_arena` | per-message (reset after `fromApp`) | `OffsetTable::entry[]`, hash overlay, group sub-indices, validator scratch (`seen[]` + `required_remaining`) | session FSM after `fromApp` returns |
 | `SessionConfig::framer_carry_arena` | session lifetime | `pmr_carry_buffer` (sized `max_frame_bytes + small constant` once at construction) | session destruction only |
-| `Writer::scratch_mr` (constructor parameter) | one outbound build turn (typically the per-message arena reused) | `group_writer` open-group bookkeeping (count + per-entry offset list) | caller resets after `commit()` |
 
 Per `[const §VIII.5]`: zero `new`/`delete` between parse and `fromApp`. The arena reset cadence for `message_arena` (per-message — the choice this doc requires — vs per-batch) is logged as `2b §10 Q4` and confirmed at **2d**; wire's preference is per-message because it bounds peak per-session memory most tightly. v0.1's "Carry is allocated from a caller-supplied PMR resource (typically `SessionConfig::message_arena`)" claim was *wrong on the lifetime axis* — carry spans messages and cannot live in a per-message-reset arena. Per Opus adversarial NEW P1.
 
@@ -779,10 +778,10 @@ Per `[arch §10]` requirement (4): every design doc ends with the test seams it 
 7. **Lifetime-trap test (debug build)** — construct a `MessageView`, rotate the originating arena's generation, access the view → expect trap. Also: confirm release builds *don't* trap (UB is acceptable in release; we don't try to make it deterministic). Add a Clang `-Wdangling` smoke test that verifies the lifetimebound annotations actually fire on a known-bad capture pattern.
 8. **Repeating-group equivalence** — for any group-bearing message, `group_view::iter()` and `group_view::operator[]` enumerate the same entries in the same order. Catches divergence between the two paths.
 9. **Unknown-fields preservation** — generate messages with (a) intentionally-unknown tags (dictionary-missing); (b) dictionary-known-but-invalid-for-this-MsgType tags. Verify (a) the typed accessors see only typed tags; (b) `unknown_fields()` enumerates *only* the dictionary-missing ones; (c) the dictionary-known-invalid ones produce `error::wire_unexpected_tag` from the validator (v0.2 rule split per §6.5 rule 5); (d) round-trip writes the dictionary-missing tags back in original byte positions.
-10. **Allocation guard (Linux)** — `tools/check_alloc.py` runs the `Framer → Parser<Index> → Validator → Writer → commit` loop under `mallocnesia`; any heap allocation between parse and commit fails CI. Verifies the §6.6 three-arena pinning. Same Linux-only caveat as 2a §9 seam #6.
+10. **Allocation guard (Linux)** — `tools/check_alloc.py` runs the `Framer → Parser<Index> → Validator → Writer → commit` loop under `mallocnesia`; any heap allocation between parse and commit fails CI. Verifies the §6.6 arena pinning. Same Linux-only caveat as 2a §9 seam #6.
 11. **Fuzzer (libFuzzer)** — `tests/fuzz/fuzz_wire_framer.cpp`, `fuzz_wire_parser.cpp`, `fuzz_wire_validator.cpp`; ASan + UBSan invariants. Required by `[const §IX.4]`.
 12. **CheckSum/BodyLength corruption corpus** — bit-flips in body, off-by-one BodyLength values, valid CheckSums on truncated frames, **explicit space-padded BodyLength** (`9=   123|`) frames (verifying the v0.2 `Framer` rejects them per `[FIX50SP2 §3.3]` `Length` data-type rule), and **XOR-checksum frames** (verifying the v0.2 byte-sum-mod-256 algorithm rejects them). `Framer` rejects each with the documented error.
-13. **Three-arena pinning test** — construct `Framer`, `Parser<Index>`, `Writer` with three distinct PMR `monotonic_buffer_resource`s (carry, message, scratch); verify allocations land on the correct arena per §6.6. Reset each independently and confirm no use-after-reset on the others.
+13. **Arena pinning test** — construct `Framer` and `Parser<Index>` with distinct PMR `monotonic_buffer_resource`s (carry, message); verify allocations land on the correct arena per §6.6. Reset each independently and confirm no use-after-reset on the others. Updated (W1, `.specify/688-707-559-wire-headroom-token.md` D-559-1): the seam named three arenas, the third a `Writer` scratch; the writer allocates nothing, so there is no writer half to pin (`tests/wire/three_arena_pinning_test.cpp` keeps its name).
 14. **Validator domain test** — feed messages with malformed *optional* fields (a wrong-type `Price`, an out-of-enum `Side`); verify `Validator::validate(msg)` rejects unconditionally — not contingent on any typed accessor having been called. Catches a regression to v0.1's per-accessor model.
 
 ## 10. Open questions

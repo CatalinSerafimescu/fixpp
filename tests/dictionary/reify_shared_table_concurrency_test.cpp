@@ -88,9 +88,11 @@ TEST(ReifySharedTableConcurrency, TwoThreadsReadOneSharedTable) {
             if (unknown > h.view().offsets().entries().size()) {
                 failures.fetch_add(1, std::memory_order_relaxed);
             }
-            // The view caches its group slices and unknown fields after the first
-            // call, so every iteration also calls the shared table's callbacks
-            // directly: classification, group membership and the delimiter.
+            // The view caches its group slices after the first call, and since W1
+            // (`.specify/688-707-559-wire-headroom-token.md` D-688-1) its unknown fields
+            // classify on every iteration, and the view remembers where the first one is (D-688-2);
+            // every iteration also calls the shared table's
+            // callbacks directly: classification, group membership and the delimiter.
             auto const& hooks = h.view().hooks();
             if (!hooks.classify_fn()(hooks.opaque_dict(), "8", kNoLegs)) {
                 failures.fetch_add(1, std::memory_order_relaxed);

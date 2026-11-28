@@ -609,6 +609,7 @@ if(TARGET fixpp_codegen_generate)
     reify_membership_identity_test    # label-heterogeneous 066;dictionary;us1
     reify_membership_copy_oom_test    # global-new alloc counting + 066;dictionary;us1
     reify_shared_table_concurrency_test  # fixpp#495 T-17: threads, TSan target (495;dictionary;tsan)
+    reify_shared_empty_view_concurrency_test  # W1 D-688-2 cell (e): threads, TSan target; one cell only
   )
   foreach(target IN LISTS FIXPP_REIFY_STANDALONE)
     add_executable(dictionary_${target} "${target}.cpp")
@@ -634,6 +635,12 @@ if(TARGET fixpp_codegen_generate)
   # fixpp#495 T-17 (`.specify/495-493-486-dict-reify-copy.md` §10): a TSan target.
   set_tests_properties(dictionary_reify_shared_table_concurrency_test PROPERTIES
     LABELS "495;dictionary;tsan")
+
+  # W1 D-688-2 (`.specify/688-707-559-wire-headroom-token.md` §1.4a, cell (e)): a TSan target. Keep
+  # it to its one cell, so that its process's first unknown_fields() call on the shared empty view
+  # is made inside the cell's two threads.
+  set_tests_properties(dictionary_reify_shared_empty_view_concurrency_test PROPERTIES
+    LABELS "dictionary;tsan")
 
   # 066-dict-backed-inbound-parse T008: label override so `ctest -L 066`
   # (and the T021/T022 coverage-index / completeness audit) picks these up.

@@ -74,17 +74,17 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         "38=100\x01"
         "40=2\x01"
         "44=185.25\x01"
-        "59=0\x01");
+        "59=0\x01"
+        "5000=UNDEFINED\x01");
 
     auto fv = fixpp::wire::test::make_frame_view(frame);
     ASSERT_TRUE(fv.has_value());
 
-    // Stack backing for the per-message arena and the Writer scratch/dst.
+    // Stack backing for the per-message arena and the Writer's destination.
     // Sized far above one NewOrderSingle's OffsetTable footprint
     // (entry[]+overlay, see T049 spike: ~404 B for ~23 occ). NULL upstream
     // ⇒ an over-run cannot silently fall back to malloc.
     std::array<std::byte, 16384> parse_buf{};
-    std::array<std::byte, 4096> write_scratch{};
     std::array<std::byte, 1024> dst_buf{};
 
     if (alloc_guard_start) alloc_guard_start();
@@ -102,14 +102,22 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
         auto symbol = mv->template get<55>();
         ASSERT_TRUE(symbol.has_value());
 
+        // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 4): the unknown-field view
+        // and its iteration, inside the window. The parser is dict-free, so every non-framing
+        // field of the frame above is unknown, 5000 among them.
+        std::size_t unknown = 0;
+        for (auto const& kv : mv->unknown_fields()) {
+            (void)kv;
+            ++unknown;
+        }
+        ASSERT_EQ(unknown, 12U);
+
         // Full serialize path: dict-free Iter walk → Writer → commit.
-        std::pmr::monotonic_buffer_resource write_mr{write_scratch.data(), write_scratch.size(),
-                                                     std::pmr::null_memory_resource()};
         Parser<access_mode::Iter> itp{};
         auto iv = itp.parse_iter(*fv);
         ASSERT_TRUE(iv.has_value());
 
-        Writer writer{std::span<std::byte>{dst_buf.data(), dst_buf.size()}, &write_mr};
+        Writer writer{std::span<std::byte>{dst_buf.data(), dst_buf.size()}};
         for (auto it = iv->begin(); !(it == iv->end()); ++it) {
             auto const& f = *it;
             if (is_auto_framing_tag(f.tag)) {

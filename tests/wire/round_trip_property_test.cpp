@@ -100,8 +100,7 @@ std::vector<std::byte> structural_round_trip(std::span<const std::byte> original
     constexpr std::size_t max_bl_placeholder_overhead = 6;
     scratch_buf.assign(original.size() + max_bl_placeholder_overhead, std::byte{0});
 
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}};
 
     // Iterate ALL fields in document order (dict-free Iter path), skipping
     // the auto-framing fields (9=BodyLength and 10=CheckSum) that the Writer
@@ -156,8 +155,7 @@ TEST(RoundTripProperty, GoldenFrameHeartbeat) {
 
     // +6 for the placeholder overhead (6-digit 9= that gets memmoved away).
     std::vector<std::byte> scratch(golden.size() + 6);
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto fv = fixpp::wire::test::make_frame_view(golden);
     ASSERT_TRUE(fv.has_value());
@@ -185,8 +183,7 @@ TEST(RoundTripProperty, GoldenFrameNewOrderSingle) {
         "56=TARGET\x01");
 
     std::vector<std::byte> scratch(golden.size() + 6);
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto fv = fixpp::wire::test::make_frame_view(golden);
     ASSERT_TRUE(fv.has_value());
@@ -272,8 +269,7 @@ TEST(RoundTripProperty, ZeroCountGroupPreservedByteIdentical) {
 // Too-small buffer must return a defined error (no OOB write).
 TEST(RoundTripProperty, TooSmallBufferReturnsError) {
     std::array<std::byte, 4> tiny_buf{};
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{tiny_buf.data(), tiny_buf.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{tiny_buf.data(), tiny_buf.size()}};
 
     // Append a field that won't fit.
     std::string val = "FIX.4.4";
@@ -326,8 +322,7 @@ TEST(RoundTripProperty, TenThousandSampleCorpus) {
         auto original = make_frame(body);
         // +6 for the 6-digit BodyLength placeholder overshoot.
         std::vector<std::byte> scratch_buf(original.size() + 6);
-        std::pmr::monotonic_buffer_resource scratch_mr;
-        Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}, &scratch_mr};
+        Writer writer{std::span<std::byte>{scratch_buf.data(), scratch_buf.size()}};
 
         auto fv = fixpp::wire::test::make_frame_view(original);
         if (!fv.has_value()) {
@@ -401,8 +396,7 @@ TEST(RoundTripProperty, AppendTypedDecimalEmitsTraitBytes) {
     std::memcpy(expected.data(), exp_buf.data(), *exp_n);
 
     std::array<std::byte, 256> scratch{};
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}};
     auto bs = bytes_of("FIX.4.4");
     auto d = bytes_of("D");
     auto one = bytes_of("1");
@@ -446,8 +440,7 @@ TEST(RoundTripProperty, OpenGroupProducesByteIdenticalRepeatingGroup) {
         "452=2\x01");
 
     std::vector<std::byte> scratch(golden.size() + 6);
-    std::pmr::monotonic_buffer_resource scratch_mr;
-    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}, &scratch_mr};
+    Writer writer{std::span<std::byte>{scratch.data(), scratch.size()}};
 
     auto bs = bytes_of("FIX.4.4");
     auto d = bytes_of("D");
