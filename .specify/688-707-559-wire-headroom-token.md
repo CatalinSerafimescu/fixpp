@@ -1,6 +1,6 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.6: R-W1-6 delta, scoped Codex Gate A review pending (2026-11-28). D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
+> **Status: v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10; scoped round 5 re-check pending (2026-11-28). v0.6: R-W1-6 delta, D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
 > Issue-mode design note. v0.5 (D-688-1, D-707-1/2, D-559-1) is implemented on the branch; D-688-2 is not yet. Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
@@ -24,7 +24,7 @@
 | Id | Issue | Decision |
 |---|---|---|
 | D-688-1 | #688 | `unknown_fields()` becomes the filtered view `[2b §4.8]` specifies: it walks the offset table and allocates nothing, so there is no exhaustion to report. It yields the tags the dictionary does not define (`table_view::tag_defined`), not the tags the MsgType does not declare (R-W1-3). |
-| D-688-2 | #688 (R-W1-6, v0.6) | `MessageView<Index>` remembers where the first unknown entry is: one `std::uint32_t` index into `entries()`, written by the first `unknown_fields()` call over a non-empty table, in existing padding, so later calls start there and the view's size does not change (§1.4a). |
+| D-688-2 | #688 (R-W1-6, v0.6) | `MessageView<Index>` remembers where the first unknown entry is: one `std::uint32_t` index into `entries()`, written by the first `unknown_fields()` call over a non-empty table, in existing padding, so later calls start there. The design requires both modes' `sizeof` and `alignof` to stay those of the tree before D-688-2, read before and after on each toolchain (§1.4a). |
 | D-707-1 | #707 | `group_writer_token` gets 104's shape (a user-provided private copy constructor). `Writer::open_group` builds the `group_writer` itself, because `std::in_place` copies the key outside `Writer`. |
 | D-707-2 | #707 | The census the issue asks for finds `dict::detail::snapshot_key` of the same shape, and W1 fixes it (R-W1-2). It gets a user-provided private default constructor and a user-provided **public** copy constructor, because `std::make_shared` copies it. |
 | D-559-1 | #559 site 1 | Delete `Writer::scratch_mr_` and the constructor's `scratch_mr` parameter. The writer keeps no group bookkeeping, so there is nothing to put on it. W1 closes #559; its fourth site is fixpp#735 (R-W1-1). |
@@ -368,31 +368,76 @@ three §1.4 statements this one changes are flagged there.
 **The shape.**
 - `MessageView<Index>` gains one private member, `first_unknown_`: an index into `table_.entries()`.
   - Index mode only, as `resolved_application_version_` and `dict_owner_` are:
-    `[[no_unique_address]] std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_first_unknown_t>`,
+    `using first_unknown_t = std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_first_unknown_t>;`
+    and `[[no_unique_address]] mutable first_unknown_t first_unknown_{not_computed()};`. It is
     `mutable` because `unknown_fields()` is `const`.
+  - **`no_first_unknown_t` is a new empty type** (`struct no_first_unknown_t {};`), distinct from
+    `no_resolved_version_t`, `no_dict_owner_t` and `empty_t`. Two `[[no_unique_address]]` members of
+    the same empty type cannot share an address, so reusing one of those types would give
+    `MessageView<Iter>` a byte of its own on clang and gcc (§A.7 compiles both forms).
+  - **The initializer is mode-dependent**, in the pattern `hooks_{no_hooks()}` already uses
+    (`static constexpr hooks_holder_t no_hooks()`, `include/fixpp/wire/parser.hpp`): a
+    `static constexpr first_unknown_t not_computed() noexcept` returns
+    `detail::kFirstUnknownNotComputed` for Index and `no_first_unknown_t{}` for Iter.
+    - Not `{std::numeric_limits<std::uint32_t>::max()}`: every constructor uses the default member
+      initializer, so it is instantiated for `MessageView<Iter>` too, and initialising an empty
+      struct from a `std::uint32_t` is ill-formed (§A.7).
+    - Not `{}`, the spelling `resolved_application_version_{}` uses: it gives Index the value 0, which
+      reads as "computed, first unknown entry at index 0", so the first call would yield the framing
+      tag 8. Cell (a)'s first-call count and the existing cells would catch that loudly; the design
+      names the form so that no one reaches for it.
   - Declared immediately after `resolved_application_version_` (the layout, below).
-- **The encoding, one sentinel.**
-  - **"Not computed yet"** is `std::numeric_limits<std::uint32_t>::max()`, the default member
-    initializer.
-  - A value `v <= entries().size()` is computed: `v < size()` is the first unknown entry's index;
-    **"none"** (the frame has no unknown field) is `v == size()`, the end index. That is what
-    `unknown_fields_view::next_unknown` returns when it finds nothing (`first == s.end`), so "none"
-    needs no second magic value.
-  - So one test, `first_unknown_ <= entries().size()`, means "computed"; anything above the size,
-    the sentinel included, means "not computed" (the moved-from source, below).
+- **The encoding: one sentinel, checked in code on both sides.**
+  - **"Not computed yet"** is `detail::kFirstUnknownNotComputed`,
+    `std::numeric_limits<std::uint32_t>::max()`, the Index value of `not_computed()`.
+  - A stored value `v` that is not the sentinel and has `v <= entries().size()` is computed:
+    `v < size()` is the first unknown entry's index; **"none"** (the frame has no unknown field) is
+    `v == size()`, the end index. That is what `unknown_fields_view::next_unknown` returns when it
+    finds nothing (`first == s.end`), so "none" needs no second magic value.
+  - **Read:** `detail::first_unknown_is_set(std::uint32_t v, std::size_t size)` is
+    `v != kFirstUnknownNotComputed && v <= size`.
+    - The `!=` half keeps the sentinel from reading as "computed at index `UINT32_MAX`" on a table of
+      `UINT32_MAX` entries or more. That would start the view past every earlier entry and silently
+      drop their unknown fields.
+    - The `<= size` half makes the moved-from source rescan (below).
+  - **Store:** `detail::first_unknown_fits(std::size_t idx)` is `idx < kFirstUnknownNotComputed`. A
+    found index that does not fit is not stored. The sentinel stays, and that view rescans on every
+    call, which is D-688-1's behaviour, so what it yields is still right.
+  - **Where they live:** both are `constexpr` free functions in `fixpp::wire::detail` in
+    `include/fixpp/wire/parser.hpp`, beside `kFirstUnknownNotComputed`, with `static_assert`
+    witnesses next to them:
+    - `!first_unknown_is_set(kFirstUnknownNotComputed, std::size_t{kFirstUnknownNotComputed} + 1U)`:
+      the sentinel is not "computed" on a table one entry larger than it. Where `std::size_t` is
+      64-bit, it fails the build if the `!=` half is dropped. Where it is 32-bit, the sum wraps to 0
+      and the assertion holds either way (reasoned from unsigned arithmetic; no 32-bit toolchain was
+      run);
+    - `!first_unknown_fits(kFirstUnknownNotComputed)` and
+      `first_unknown_fits(kFirstUnknownNotComputed - 1U)`;
+    - `first_unknown_is_set(3, 3)` and `!first_unknown_is_set(4, 3)`.
+  - **What the witnesses kill, and what has no cell.**
+    - CI cannot build a table of 2^32 entries: a direct `Parser` would need `max_offset_entries`
+      raised far past its default and a frame of several GiB. So the runtime path past 2^32 entries
+      has no executable cell.
+    - The `static_assert`s kill a mutation of either predicate at compile time (§A.7 runs both
+      mutants). They do not see the call sites. A store that skips `first_unknown_fits` behaves
+      identically below 2^32 entries, so no cell can fail on it; a read that tests only the `!=`
+      half at the call site is cell (b)'s M4.
+    - The call sites are re-derived with
+      `git grep -n -E 'first_unknown_(is_set|fits)\(' -- include/fixpp/wire/parser.hpp`, which must
+      print the two definitions, their witnesses, and one call of each in `unknown_fields()`.
 - **`unknown_fields()`, in order** (the order matters: step 2 comes before step 3, so a moved-from
   source reads its stale index through the guard, and test (b)'s mutants can show):
   1. `check_alive()`, as now, before anything is read.
-  2. `ents = table_.entries()`. If `first_unknown_ <= ents.size()`, build the view through
-     `unknown_fields_view`'s private constructor
+  2. `ents = table_.entries()`. If `detail::first_unknown_is_set(first_unknown_, ents.size())`, build
+     the view through `unknown_fields_view`'s private constructor
      (`unknown_fields_view(scan_state, entry const* first, generation_token)`; `MessageView` is its
      friend) at `ents.data() + first_unknown_`. No classify call is made. Re-entering `scan` at that
      index would classify the cached entry once more, and test (a) below pins that it does not.
   3. Otherwise, if `ents` is empty, return the view of an empty range and write nothing (the shared
      empty view, under the thread contract below). The scan there is O(1) anyway. A default-constructed
      view holds the sentinel, so it reaches this step and is only ever read.
-  4. Otherwise run `scan` from `ents.data()` as today, store the found entry's index, and return
-     that view.
+  4. Otherwise run `scan` from `ents.data()` as today. Store the found entry's index `idx` if
+     `detail::first_unknown_fits(idx)`, and otherwise leave the sentinel. Return that view.
 - **Representation: an index, not an `entry const*`. The ruling's premise does not hold in source.**
   - R-W1-6 says "a copied MessageView copies its OffsetTable". Read at `10e73842`: `MessageView`'s
     copy constructor and copy assignment are `= delete`, and so is its move assignment; only its
@@ -422,13 +467,22 @@ three §1.4 statements this one changes are flagged there.
   - `std::uint32_t` is the width the table already uses for an entry index: `overlay_` is a
     `std::pmr::vector<std::uint32_t>` whose slots hold `static_cast<std::uint32_t>(e) + 1U`
     (`OffsetTable::build`), and `entry::offset` is a `std::uint32_t`.
-  - **The condition the encoding needs:** `entries().size() < UINT32_MAX`, so that the sentinel is
-    never a computed value. Each entry takes at least two frame bytes (`build` rejects an empty tag
-    and a missing `=`), and `entry::offset` must hold every value offset. So every table within
-    the table's own condition has fewer than 2^31 entries.
+  - **Why the store is bounded.** Nothing in source keeps `entries().size()` below 2^32:
+    `max_offset_entries` has no clamp, and `OffsetTable::build` has no frame-length bound. So the
+    encoding checks representability itself, on the read side and on the store side (above), and
+    relies on no table condition.
+  - **Rejected: a `std::uint32_t` index plus a `bool` "computed" flag.** It still truncates an index
+    of 2^32 or more on store, so it still needs the store bound, and it still needs `<= size` for the
+    moved-from source. It removes neither check. It adds a member and a second declaration-order
+    constraint: the flag must also sit in the gap before `dict_owner_`, or the size grows.
+  - **Rejected: a cardinality invariant in `OffsetTable::build`.** It changes the table's rejection
+    surface (a new error disposition and a B&L row), it is just as unwitnessable at that size, and it
+    is outside D-688-2.
+  - **Disclosed for filing:** `OffsetTable::build` already narrows the value offsets and lengths of a
+    frame past 4 GiB (§6). D-688-2 does not depend on it.
 - **The moved-from source.** After the defaulted move both objects hold the index. The source's
   entries are valid but unspecified; libstdc++, libc++ and the MSVC STL leave a move-constructed-from
-  vector empty. Through the guard of step 2, an index above the source's size reads as "not computed",
+  vector empty. Through the `<= size` half of step 2's guard, an index above the source's size reads as "not computed",
   so the source rescans what it holds (an empty table: step 3, no write). The guard is exact while a moved-from vector holds either the
   source's elements or none, and nothing can change the source's entries after the move (the
   invalidation, below).
@@ -486,13 +540,15 @@ and the dictionary's answers. Each is fixed after construction:
   thread. Two threads, each holding its own empty handle, reach one `MessageView`. Step 3's rule
   (nothing is written over an empty table) keeps `unknown_fields()` from writing it, because
   `kEmpty`'s table is default-constructed and empty. Test (e) pins the rule.
-  - **Disclosed, not fixed here:** `group<>()` on `kEmpty` already writes `set_group_context`'s
-    members (read). Whether a declined slice read on its empty table also memoises a row in
-    `group_index_` was not traced. This predates W1 and is outside it. It goes to the orchestrator
-    to be filed.
-- **The C ABI does not reach the index.** No C symbol calls `unknown_fields()`
-  (`git grep -n unknown_fields -- src` finds one comment, in `src/capi/message_write.cpp`), so
-  `B-051-2`'s THREAD_SAFE clone reads are untouched.
+  - **Disclosed and filed, not fixed here:** `group<>()` on `kEmpty` already writes
+    `set_group_context`'s members (read). That is fixpp#736 (OPEN, batch B96), "owning_message_handle::view()'s
+    shared static empty MessageView is written by const group<>() on every thread". Whether a
+    declined slice read on its empty table also memoises a row in `group_index_` was not traced
+    here. It predates W1 and is outside it.
+- **The C ABI does not reach the index.** No C symbol calls `unknown_fields()`:
+  `git grep -n unknown_fields -- src` prints only comments (no call), and
+  `git grep -n unknown_fields -- bindings tools` prints nothing. So `B-051-2`'s THREAD_SAFE clone
+  reads are untouched.
 - **No test reads one `MessageView` from two threads.**
   - `tests/dictionary/reify_shared_table_concurrency_test.cpp` reads two reify handles, `ha` and
     `hb`, each over its own `MessageView`, one handle per thread. With the index, each thread's
@@ -507,13 +563,17 @@ and the dictionary's answers. Each is fixed after construction:
   movable, so `MessageView`'s defaulted move constructor would become deleted.
 - **B&L:** no new row. `B-688-1` gains one sentence citing `[2b §6.6]` (§4).
 
-**The layout. The design requires that `sizeof(MessageView<…>)` does not change.**
-- **Where the room is.** On clang and gcc (§A.6), `resolved_application_version_` (an
+**The layout. The design requires that `sizeof` and `alignof` of both `MessageView<access_mode::Index>`
+and `MessageView<access_mode::Iter>` equal those of the tree before D-688-2, on each toolchain, in
+release and in debug.** The re-derive recipe below checks it, before and after. No result is claimed
+here ahead of the after-run.
+- **Where the room is.** In §A.6's before-run on clang and gcc, `resolved_application_version_` (an
   `application_version`, `std::uint8_t`-based) is followed by `dict_owner_`, a pointer, with 7
-  bytes of padding between them in release and in debug. A `std::uint32_t` declared right after
-  `resolved_application_version_` lands in that padding, 4-aligned, so the size does not change.
-  Declared anywhere else, for example last, it adds 8 bytes. So the declaration order is part of the
-  design.
+  bytes of padding between them, in release and in debug. A `std::uint32_t` declared right after
+  `resolved_application_version_` lands in that padding, 4-aligned. Declared anywhere else, for
+  example last, it adds 8 bytes. So the declaration order is part of the design.
+- **`MessageView<Iter>` on clang and gcc.** The new member is a `[[no_unique_address]]` member of a
+  new, distinct empty type (the shape, above), so it needs no byte of its own.
 - **MSVC (reasoned, not measured).** x64 MSVC uses the same natural-alignment rule. `hooks_` ends on
   an 8-byte boundary and the 1-byte member is followed by an 8-aligned pointer, so the same gap exists
   in debug and release, whatever the STL's container sizes are.
@@ -522,25 +582,49 @@ and the dictionary's answers. Each is fixed after construction:
     the new empty member is one more byte beside the two empty members already at its tail, within the
     tail padding.
   - Measured at the `-k 0` MSVC build of the touched targets: one TU compiled with
-    `/d1reportSingleClassLayoutMessageView`, against the same at the merge base.
-- **The re-derive recipe, run before and after on each toolchain.**
-  - clang: `clang++ -std=c++23 -fsyntax-only [-DNDEBUG] -I include -Xclang -fdump-record-layouts-complete <a TU that includes fixpp/wire/parser.hpp and names sizeof(MessageView<access_mode::Index>)>`.
-    Read the `MessageView<Index>` record: `first_unknown_`'s offset falls between
-    `resolved_application_version_`'s and `dict_owner_`'s, and `sizeof` equals the merge base's.
-  - gcc: `template <unsigned long> struct S; S<sizeof(MessageView<access_mode::Index>)> s;`. The
-    incomplete-type error prints the size.
+    `/d1reportSingleClassLayoutMessageView`, against the same TU before D-688-2 (at `10e73842`). The
+    run must read the layout of both specialisations, Index and Iter. If the switch's report does not
+    show both, each gets its own TU.
+- **The re-derive recipe, run before and after on each toolchain, release (`-DNDEBUG`) and debug.**
+  The TU includes `fixpp/wire/parser.hpp` and names `sizeof` and `alignof` of both specialisations
+  (§A.6 gives it).
+  - clang: `clang++ -std=c++23 -fsyntax-only [-DNDEBUG] -I include -Xclang -fdump-record-layouts-complete <the TU>`.
+    Read both `MessageView` records: in Index, `first_unknown_`'s offset lies between
+    `resolved_application_version_`'s and `dict_owner_`'s; in both, `sizeof` and `align` equal the
+    before-run's.
+  - gcc: `template <unsigned long, unsigned long, unsigned long, unsigned long> struct S; S<sizeof(MessageView<access_mode::Index>), alignof(MessageView<access_mode::Index>), sizeof(MessageView<access_mode::Iter>), alignof(MessageView<access_mode::Iter>)> s;`.
+    The incomplete-type error prints the four values.
   - MSVC: the bullet above.
-- **Every pin that could fire.** Each is re-derived over
-  `tests include src bindings bench tools perf`, with `':!.specify/688-707-559-wire-headroom-token.md'`
-  so that no recipe matches this note:
-  - (P1) `git grep -n -E 'sizeof ?\([^)]*\b(MessageView|unknown_fields_view|OffsetTable)\b' -- …`
-  - (P2) `git grep -n -E 'static_assert.*(MessageView|unknown_fields_view)' -- …`
-  - (P3) `git grep -n -E '(offsetof|alignof) ?\([^)]*(MessageView|OffsetTable|unknown_fields_view)' -- …`
-  - (P4) `git grep -n kParseContainers -- .`
-  - (P5) holders by value: `git grep -n -E '(optional|expected_t|unique_ptr)<\s*(fixpp::)?(wire::)?MessageView' -- src include tests`
-    and `git grep -n -E 'MessageView<[^>]*>\s+[a-z_]+_\s*(;|\{|=)' -- src include`.
-  - **Known positive:** P1 prints the `sizeof(OffsetTable::entry)` pins (`tests/wire/offset_table_test.cpp`
-    among them), so it can report a pin.
+  - No `std::optional<MessageView<Index>>` probe: for one standard library, `optional<T>`'s layout is
+    a function of `sizeof(T)` and `alignof(T)`, which the recipe reads.
+- **Every pin that could fire.** Each recipe runs over `tests include src bindings bench tools perf`
+  unless it names its own paths, with `':!.specify/688-707-559-wire-headroom-token.md'` so that no
+  recipe matches this note. **The rule:** every hit the disposition below names appears in its
+  recipe's printed output, and every file a recipe prints is dispositioned below. A name no recipe
+  prints is a recipe defect, fixed before the list is trusted.
+  - (P1) `git grep -n -E 'sizeof ?\([^)]*\b(MessageView|unknown_fields_view|OffsetTable)\b' -- …`.
+    Known positive: the `sizeof(OffsetTable::entry)` pin in `tests/wire/offset_table_test.cpp`.
+  - (P2) multiline, because a `static_assert(` can stand alone on its line and `git grep` has no
+    multiline mode:
+    `git ls-files -z -- tests include src bindings bench tools perf | xargs -0 perl -0777 -ne 'while (/static_assert\s*\([^;]{0,500}?\b(MessageView|unknown_fields_view)\b/g) { my $l = 1 + (substr($_, 0, $-[0]) =~ tr/\n//); print "$ARGV:$l\n"; }'`.
+    It prints `file:line` for each `static_assert` that names either type before its first `;`.
+    Known positive: the `unknown_fields_view` pin in `tests/wire/type_shape_pins_test.cpp` whose
+    `static_assert(` stands alone on its line, which a single-line `git grep` misses.
+  - (P3) `git grep -n -E '(offsetof|alignof) ?\([^)]*(MessageView|OffsetTable|unknown_fields_view)' -- …`.
+    Known positive: the `alignof(OffsetTable::entry)` pin in `tests/wire/offset_table_test.cpp`.
+  - (P4) `git grep -n kParseContainers -- .`. Known positive: the constant's definition in
+    `src/session/parse_capacity.hpp`.
+  - (P5) holders by value, in three recipes:
+    - (P5a) `git grep -n -E '(optional|expected_t|unique_ptr)<\s*(::)?(std::)?(::)?(fixpp::)?(wire::)?MessageView' -- src include tests tools`.
+      Known positive for the leading-`::` allowance: the generated holder's golden in
+      `tests/codegen/accessor_resolution_census_test.cpp`
+      (`::std::optional<::fixpp::wire::MessageView<…>>`), which the form without `::` misses.
+    - (P5b) direct members: `git grep -n -E 'MessageView<[^;]*>\s+[a-z_]+_\s*[;{=]' -- src include tests tools`.
+      Known positives: `src/dictionary/reify.cpp`'s `view_cache_`, the same golden's `view_cache_`,
+      and `tests/support/copy_site_fixtures.hpp`'s `mv_`.
+    - (P5c) the emitter writes its holder's type from pieces (`w.raw(kMessageView)`), so no
+      `MessageView` regex reaches it: `git grep -n -F view_cache_ -- tools`. Known positive:
+      `tools/codegen/fixpp-codegen/emit_reify.cpp`.
 
   **What each kind of hit does under D-688-2**, as read at `10e73842`:
   - **The codegen flyweight pin** (`tests/codegen/accessor_resolution_census_test.cpp`,
@@ -555,19 +639,39 @@ and the dictionary's answers. Each is fixed after construction:
   - **Every `sizeof(OffsetTable)` band** (`tests/capi/message_read_failloud_test.cpp`,
     `tests/wire/group_view_failloud_test.cpp`, `tests/wire/nested_group_slices_failloud_test.cpp`,
     `tests/support/group_read_100.hpp`, `tests/wire/test_100_group_read_status.cpp`,
-    `build_nested_subview`'s allocation in `src/wire/offset_table.cpp`): unchanged.
+    `build_nested_subview`'s allocation in `src/wire/offset_table.cpp`), and the comments that
+    describe them (`include/fixpp/wire/offset_table.hpp`, `tests/wire/nested_group_slices_cache_test.cpp`):
+    unchanged.
     - The index lives in `MessageView`, not in `OffsetTable`. That is a requirement: in
       `OffsetTable` it would move every band calibrated to its size, and each nested sub-table would
       carry an index nothing reads.
-  - The `OffsetTable::entry` and `Config` pins: unchanged.
+  - **The `OffsetTable` nested types' sizes and alignments** (`entry`, `Config`, `group_span`,
+    `nested_cache_row`), wherever P1 and P3 print them (`tests/`, `tests/support/wire_test_hooks.hpp`,
+    `bench/wire/offset_table_footprint_bench.cpp`, `src/session/parse_capacity.hpp`'s formula):
+    unchanged. D-688-2 changes no `OffsetTable` type.
   - **`kParseContainers`** (`src/session/parse_capacity.hpp` and the test's own copy in
     `tests/session/inbound_frame_dispositions_test.cpp`): unchanged. No container is added, and the
-    member is not in the parse resource.
-  - **The holders:** `owning_message_handle::impl`'s `std::optional<MessageView>` (in the caller's
-    `mr`), `src/capi/message_write.cpp`'s `std::unique_ptr<MessageView>`, and the tests'
-    `std::optional` holders. None has a size pin. No C-ABI struct holds a `MessageView`:
-    `<fix/c_api.h>` exposes no wire type (`[2b §5]`).
-  - `bindings/`, `tools/` and `perf/`: no hit for any recipe.
+    member is not in the parse resource. The records P4 prints in `brain/`, `spec/` and
+    `specs/093-inbound-frame-dispositions/` cite the constant and change with it only.
+  - **The holders** (P5). None has a size pin, and each one's size follows
+    `sizeof(MessageView<Index>)`, which the design keeps (the layout, above):
+    - `Parser::parse`'s and `parse_iter`'s `core::expected_t<MessageView<…>>` results
+      (`include/fixpp/wire/parser.hpp`);
+    - `owning_message_handle::impl`'s `std::optional<MessageView>` `view_cache_`
+      (`src/dictionary/reify.cpp`, in the caller's `mr`);
+    - the C ABI's heap-held view, `fixpp_msg::owned_view_`, a `std::unique_ptr`
+      (`src/capi/capi_internal.hpp`), which `fixpp_msg_clone` fills from its local `clone_view`
+      (`src/capi/message_write.cpp`);
+    - **the generated `owning_<Msg>` holder**: its `mutable std::optional<MV> view_cache_`, emitted by
+      `tools/codegen/fixpp-codegen/emit_reify.cpp`, with its golden in
+      `tests/codegen/accessor_resolution_census_test.cpp`. It is per-object (no shared static), and
+      `view()` fills it lazily. Its move constructor and move assignment reset both the source's and
+      the destination's cache to `nullopt`, so a stored index never travels through it;
+    - the tests' holders (`tests/support/copy_site_fixtures.hpp`, `tests/support/group_read_100.hpp`,
+      `tests/session/test_067_builder_roundtrip.cpp`, `tests/wire/unknown_fields_test.cpp`).
+    - No C-ABI struct holds a `MessageView` by value: `<fix/c_api.h>` exposes no wire type (`[2b §5]`).
+  - `bindings/` and `perf/`: no hit for any recipe. `tools/`: only P5c's emitter hit (the generated
+    holder, above).
 
 **Behaviour: unchanged for every frame.**
 - What `unknown_fields()` yields is unchanged. The stored index is the value `scan` finds, a pure
@@ -637,16 +741,34 @@ bundle from `tests/support/dict_hooks_test_access.hpp`'s `make`:
     - `MessageView<Index> b{std::move(**src)}`.
     - `b` yields the source's (tag, value) list from before the move, also after the source is
       destroyed with `src.reset()`. `b` owns the buffer after the move.
-  - **The moved-from source**, run inside `EXPECT_EXIT(…, ::testing::ExitedWithCode(0), "")` so that
-    a mutant's crash fails this cell and not the whole bucket: its `unknown_fields()` terminates and
-    yields no more fields than its own `offsets().entries().size()`.
-    - M4, `first_unknown_ != sentinel` in place of `first_unknown_ <= entries().size()`: the source
-      builds its view at `data() + k` over its empty table, with `k > 0` because entry 0 is the
-      framing tag 8. Reading it runs past the table: RED by crash on every lane.
-    - M5, an `entry const*` in place of the index: the source's pointer points into `b`'s buffer
-      while its end is its own empty table's. The scan runs away: RED by crash, and ASan names the
-      read. M5 also shows in §A.6's re-run: a pointer does not fit the 7-byte gap, so the size grows
-      by 8.
+  - **The moved-from source**, `**src` after the move, read while `b` is alive and before
+    `src.reset()`:
+    - **Precondition, in the parent:** `ASSERT_TRUE((**src).offsets().entries().empty())`. M4 shows
+      only over an empty moved-from table, so on a standard library that kept the elements the arm
+      reports instead of silently not testing M4.
+    - **The oracle is the child's exit code, and nothing is iterated:**
+      `EXPECT_EXIT({ auto const uf = (**src).unknown_fields(); std::_Exit(uf.empty() && uf.begin() == uf.end() ? 0 : 1); }, ::testing::ExitedWithCode(0), "")`,
+      with no `EXPECT` inside. A death-test child's assertions do not reach the parent; only its exit
+      status does, and a statement that returns without exiting fails as "did not die". So a count
+      checked inside the child would fail toward clean. The death test also keeps a mutant's crash
+      inside this cell instead of ending the bucket.
+    - **M4, step 2 tests only `first_unknown_ != kFirstUnknownNotComputed`** (the `<= size` half
+      dropped at the call site; dropped inside `first_unknown_is_set`, it already fails the build on
+      `!first_unknown_is_set(4, 3)`). In the index-set arm the source builds its view at
+      `data() + k` over its empty table, whose `data()` is null, with `k > 0` because entry 0 is the
+      framing tag 8, and the constructor reads that entry. That is undefined behaviour, so how it
+      ends depends on the lane:
+      - on the clang UBSan lanes, `-fsanitize=undefined` (`cmake/Sanitizers.cmake`) includes clang's
+        pointer-overflow check, which flags a non-zero offset applied to a null pointer, and the test
+        preset's `UBSAN_OPTIONS=halt_on_error=1` (`CMakePresets.json`) ends the child. RED by the
+        halted diagnostic. That claim is clang's: gcc's UBSan is not claimed to flag it;
+      - elsewhere, RED by the SIGSEGV observed or by exit 1, neither guaranteed.
+      - In the index-unset arm the source holds the sentinel, so M4 cannot show there.
+    - **M5, an `entry const*` in place of the index:** the source's pointer names `b`'s first unknown
+      entry, which is live while `b` is, and its end is its own empty table's. Construction and
+      `empty()` read valid memory and find an entry, so the child exits 1: RED deterministically, with
+      no undefined behaviour (the comparison is pointer equality, and nothing is iterated). M5 also
+      shows in the layout after-run: a pointer does not fit the 7-byte gap, so the size grows by 8.
     - Both mutants show only because step 2 precedes step 3. With the empty-table test first, the
       source would never read its index, and this arm could not fail.
   - **The copy sites are re-parses.** `dict::reify` of a source whose index is set; the source
@@ -659,20 +781,32 @@ bundle from `tests/support/dict_hooks_test_access.hpp`'s `make`:
   - The first call classifies every non-framing entry.
   - Every later call: `empty()` is true, and the counter stays at **0**.
   - M6, only an index below the size stored and "none" left as "not computed": RED.
-- **(d) The allocation cells stay green, with the second call inside their window.**
-  - `WireUnknownFieldsQ32.ExhaustedArenaStillYieldsEveryUnknownFieldWithNoUpstreamRequest` and
-    `WireUnknownFields.ReadingTheUnknownFieldsDrawsNothingFromTheParseResource` each gain a second
-    `unknown_fields()` call and iteration inside the counted window, so the cached path runs under
-    the same counter.
+- **(d) The allocation cells stay green, with a second call inside their window.**
+  - `WireUnknownFields.ReadingTheUnknownFieldsDrawsNothingFromTheParseResource` already makes two
+    `unknown_fields()` calls, each iterated, inside its counted window (its two-pass loop). Once
+    D-688-2 is built, its second pass runs the cached path under the counter, with no edit.
+  - `WireUnknownFieldsQ32.ExhaustedArenaStillYieldsEveryUnknownFieldWithNoUpstreamRequest` makes one
+    call. It gains a second `unknown_fields()` call and iteration inside its counted window, with the
+    same count and the same zero upstream requests asserted.
   - M7, the index kept in a container on the parse resource: RED by the parse-resource counter.
-- **(e) The shared empty view is never written.** In
-  `tests/dictionary/reify_shared_table_concurrency_test.cpp` (standalone, a TSan target):
+- **(e) The shared empty view is never written.** In its own standalone binary,
+  `tests/dictionary/reify_shared_empty_view_concurrency_test.cpp`, one cell, added to
+  `FIXPP_REIFY_STANDALONE` in `tests/dictionary/CMakeLists.txt` and labelled as
+  `reify_shared_table_concurrency_test` is (a TSan target):
   - two null handles (each moved from);
   - **precondition:** `&ha.view() == &hb.view()` (the same `kEmpty`), so the instrument can see a
-    race;
+    race. It reads only the addresses, never `unknown_fields()`;
   - two threads each loop on `h.view().unknown_fields().empty()`.
-  - M8, the index written over an empty table: TSan reports a race on `first_unknown_`. That is RED
-    on the TSan lane only; on other lanes the cell is green either way, and that is stated with it.
+  - **Why its own process.** M8 writes once: after the first call over an empty table, `0 <= 0` reads
+    as computed, and no later call writes. So the process's first `unknown_fields()` call on
+    `kEmpty` must be made inside the two threads. If any code in the process made it first on the
+    main thread, that write would happen-before both threads, they would only read, and TSan would
+    stay clean with M8 live. Each binary in `FIXPP_REIFY_STANDALONE` is one `add_test` process for
+    all its cells, so a binary with this one cell keeps the condition by construction. Nothing else
+    may be added to it.
+  - M8, the index written over an empty table: one thread's first-call write, raced by the other
+    thread's first call, which TSan reports on `first_unknown_`. That is RED on the TSan lane only;
+    on other lanes the cell is green either way, and that is stated with it.
 
 **Comments that change** (re-derive with
 `git grep -n -i -E 'stores? (and allocates )?nothing|nothing is stored|writes no member' -- include/fixpp/wire tests/wire tests/dictionary spec/behaviors-and-limitations.md .specify/2b-wire.md brain/components/wire.md`,
@@ -685,9 +819,17 @@ then keep the hits about `unknown_fields`; `parser.hpp`'s "an Iter view stores n
   non-empty table, and later calls start there (D-688-2)." "The view copies its context out of this
   MessageView, not a pointer to it" stays true.
 - **`include/fixpp/wire/parser.hpp`, the new member's comment.** It states the encoding (the
-  sentinel, "none" as the end index), the guard and why it covers a moved-from source (and why it is
-  tested before the empty-table rule), the rule that nothing is written over an empty table (the shared `kEmpty`), the placement in the padding, and the
-  thread contract (`[2b §6.6]`: one view, one thread at a time).
+  sentinel, "none" as the end index), the two `detail` predicates and why each half exists (the
+  moved-from source, the store bound), why the guard is tested before the empty-table rule, the rule
+  that nothing is written over an empty table (the shared `kEmpty`), and the thread contract
+  (`[2b §6.6]`: one view, one thread at a time).
+  - **The placement, as a condition and a recipe only:** "declared right after
+    `resolved_application_version_` so that it falls in the padding before `dict_owner_`; re-derive
+    with `-Xclang -fdump-record-layouts-complete` (clang) or `/d1reportSingleClassLayoutMessageView`
+    (MSVC)". It states no byte count, no offset and no "the size does not change": a comment may
+    record a procedure, not a result (the parent's `.claude/CLAUDE.md`).
+  - The implementation's added comments are checked with the parent's
+    `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main`, and every hit is read.
 - **`include/fixpp/wire/unknown_fields.hpp`, the file header.** "It stores nothing: it holds the
   remaining offset-table entries, …" becomes "The view stores no list: it holds the remaining
   offset-table entries, …", and the header adds that the `MessageView` which builds it keeps one index,
@@ -739,9 +881,11 @@ then keep the hits about `unknown_fields`; `parser.hpp`'s "an Iter view stores n
     is a pointer, so it is untouched.
     - **Known positive:** the same pattern with `OffsetTable::entry` in place of the three names
       prints hits, `tests/wire/offset_table_test.cpp` among them, so the pattern can report a pin.
-  - **D-688-2 (v0.6):** `MessageView<Index>` gains `first_unknown_`, declared in existing padding, so
-    its size does not change on clang and gcc (§A.6), and MSVC is measured at its `-k 0` build. The
-    whole-repo pin recipes and each hit's disposition are §1.4a's "The layout".
+  - **D-688-2 (v0.6):** `MessageView<Index>` gains `first_unknown_`, declared in what §A.6's
+    before-run shows is padding. The design requires both modes' `sizeof` and `alignof` to equal the
+    before-run's on each toolchain: clang and gcc are read by §1.4a's recipe before and after, and
+    MSVC at its `-k 0` build. The whole-repo pin recipes and each hit's disposition are §1.4a's
+    "The layout".
 - **B(L)'s `kParseContainers` counts the `pmr::vector` members `MessageView<Index>` and `OffsetTable`
   construct from the parse resource**, times the view's moves (its recipe is the comment above it in
   `src/session/parse_capacity.hpp`).
@@ -1155,7 +1299,8 @@ closed another way.
    - **The list:** the libraries `fixpp_wire`, `fixpp_dictionary` and `fixpp_session`
      (`src/session/admin_messages.cpp` and `session.cpp` construct a `Writer`); `wire_pure_tests`
      and `wire_dict_tests`; `dictionary_pure_tests` (`dictionary_snapshot_test.cpp`),
-     `dictionary_fixt_header_merge_test` and `dictionary_reify_shared_table_concurrency_test`;
+     `dictionary_fixt_header_merge_test`, `dictionary_reify_shared_table_concurrency_test` and, with
+      D-688-2, `dictionary_reify_shared_empty_view_concurrency_test` (§1.4a cell (e));
      `session_inbound_frame_dispositions` (Q-33, Sc007); `wire_alloc_guard_test`; and the targets
      that compile `tests/interop/conversation/support/conv_wire.hpp`: `interop_conversation_test`,
      `interop_hp_fixt50sp2_logon_hb_logout_test` and `interop_readback_witness_test`.
@@ -1336,9 +1481,10 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
     The first `unknown_fields()` call writes the index, as `group<>()` writes the view's group
     context. A null reify handle's shared empty view is never written by `unknown_fields()`."
 - **Amended in v0.6 (D-688-2): `B-707-1`.** Its `parser.hpp` bullet gains: "`MessageView<Index>`
-  gains `first_unknown_`, placed in existing padding, so its size does not change on clang and gcc;
-  `MessageView<Iter>` gains an empty member." The MSVC size is the one read at its `-k 0` build. The
-  re-derive recipe stays.
+  gains `first_unknown_`, an index declared in what was padding before `dict_owner_`;
+  `MessageView<Iter>` gains an empty member." The sentence on whether either size changes is written
+  only after the after-run, from its result on each toolchain (clang and gcc by §1.4a's recipe, MSVC
+  at its `-k 0` build), and not ahead of it. The re-derive recipe stays.
 - **New: `B-559-1` (BREAKING, C++ only).** `wire::Writer` is constructed from its destination buffer
   alone. It allocates nothing, with or without groups. C ABI: none. The layout is `B-707-1`'s.
 - **New: `B-707-1`, one layout row in `B-104-7`'s shape.**
@@ -1365,7 +1511,7 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 | public C++ API or C ABI | **yes**, the C++ API only | D-688-1 (`unknown_fields_view`, `MessageView` layout); D-559-1 (`Writer`'s constructor); D-707-1/2 (the keys' copy constructors) |
 | the parser | **yes** | D-688-1 (`MessageView::unknown_fields`); D-688-2 (`MessageView<Index>`'s layout: one member, the first-unknown index) |
 | wire format or codegen layout | no | Bytes on the wire do not change, and the emitted flyweights hold a pointer. D-688-2's layout change is the parser's (row above). |
-| concurrency, session FSM, store, security | no | D-688-1 removes a `mutable` write. D-688-2 adds one back: one index, written once, inside `[2b §6.6]`'s one-thread contract and never over an empty table (§1.4a). Neither adds synchronisation. |
+| concurrency, session FSM, store, security | **yes**, concurrency | D-688-1 removes a `mutable` write. D-688-2 adds one back: one `mutable` index, written by the first `unknown_fields()` call over a non-empty table. `[2b §6.6]`'s single-thread contract is unchanged. Concurrent `unknown_fields()` on one non-empty view becomes a race, as `group<>()` on one view already is. The only library-shared view (`kEmpty`) has an empty table and is never written by `unknown_fields()` (§1.4a, cell (e)). Neither adds synchronisation. |
 | a new `.specify/` design document | **yes** | this note |
 
 **The four Appendix A controls apply, with no reading of `[const §X.6]` needed.**
@@ -1375,9 +1521,10 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
   - **Codex Gate A:** this loop. Round 1 is applied in v0.2, round 2 in v0.3, and round 3, the converged round, in v0.4
     ("Gate A").
   - **Codex Gate A, v0.6:** R-W1-6's new member changes the parser's layout, which is Appendix A's
-    trigger ("touches the wire format, parser, or codegen layout"). So the D-688-2 delta gets one
-    scoped Codex Gate A review before implementation, as the amended clauses of v4.1 to v4.4 did. It
-    is **pending**. The delta is §1.4a and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7.
+    trigger ("touches the wire format, parser, or codegen layout"). So the D-688-2 delta gets a
+    scoped Codex Gate A review before implementation, as the amended clauses of v4.1 to v4.4 did.
+    Round 4 is applied in v0.7; the scoped round 5 re-check is **pending** ("Gate A"). The delta is
+    §1.4a and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7.
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
   - **`/analyze`:** by the spec-analyzer over the converged v0.4 note, after Gate A and before
     implementation. Its findings and their dispositions are R-W1-5 in the rulings record, and v0.5
@@ -1494,8 +1641,33 @@ Re-run each recipe at implementation and disposition every hit.
     gains "the `MessageView` keeps one index, where the first unknown entry is (D-688-2)", and its
     "materialising a vector" rejection stays true: the index allocates nothing.
   - **The live B&L:** `B-688-1` and `B-707-1` (§4).
-  - **Disclosed for filing, not edited here:** `group<>()` writes `set_group_context`'s members on
-    the shared `kEmpty` of `owning_message_handle::view()` (§1.4a, the thread contract).
+  - **Disclosed and filed, not edited here:** `group<>()` writes `set_group_context`'s members on
+    the shared `kEmpty` of `owning_message_handle::view()` (§1.4a, the thread contract). It is
+    fixpp#736 (OPEN, batch B96).
+  - **Disclosed, to be filed (the orchestrator files it): `OffsetTable::build` truncates the value
+    offsets and lengths of a frame past 4 GiB, with no error.**
+    - `OffsetTable::build` (`src/wire/offset_table.cpp`) narrows each entry's value offset and value
+      length to `std::uint32_t` with a bare `static_cast` in its `entries_.emplace_back`. Nothing
+      bounds the frame to fit: `frame_view`'s lengths and `Framer::Config::max_frame_bytes` are
+      `std::size_t` (`include/fixpp/wire/framer.hpp`), and `OffsetTable::Config::max_offset_entries`
+      is an unclamped `std::size_t` (`include/fixpp/wire/offset_table.hpp`).
+    - So a frame longer than 4 GiB, parsed by a direct C++ `Parser` with `max_frame_bytes` and
+      `max_offset_entries` raised past their defaults, gets a wrong offset for every value that starts
+      at or past byte 2^32, and a wrong length for any value of 4 GiB or more, with no error.
+    - The overlay's slot value, `static_cast<std::uint32_t>(e) + 1U`, wraps at a second threshold: a
+      table of more than 2^32 − 1 entries.
+    - Re-derive the narrowings with
+      `git grep -n -E 'static_cast<std::uint32_t>\((val_start|val_len|e)\)' -- src/wire/offset_table.cpp`.
+    - Reach: the session's inbound path cannot reach it, because its frame limit is a
+      `std::uint32_t` (`inbound_limit_for` in `src/session/inbound_limit.hpp`, applied by
+      `inbound_framer_config` in `src/session/read_pump.hpp`). Other entries that parse a
+      caller-supplied frame were not traced.
+    - It predates W1 and is outside it. D-688-2 does not rely on it: its encoding checks
+      representability itself (§1.4a, the encoding).
+    - No fixpp issue covers it (searched 2026-11-28 with
+      `gh issue list -R CatalinSerafimescu/fixpp --state all --search <terms>` for "4 GiB",
+      "truncat offset_table", "uint32 OffsetTable", "value offset uint32" and "frame larger than 4").
+      The dictionary's analogous 32-bit residuals are `L-102-1` (fixpp#676, fixpp#677).
 
 ## 7. Rulings applied (no open design question)
 
@@ -1538,15 +1710,53 @@ alternative (§1.4).
 
 ## Gate A
 
-- v0.6: R-W1-6 delta, scoped Codex Gate A review pending (2026-11-28). The delta is D-688-2 (§1.4a)
-  and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7, with §A.6. The review is scoped to
-  that delta; the converged rounds below are not reopened.
+- v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10; scoped round 5 re-check pending. Codex P1=1 P2=2 P3=3 (2026-11-28). Scoped to the D-688-2 delta; the converged rounds below are not reopened. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_4_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_4_wire_headroom_token_triage.md` (paths from the parent repository's root). What each finding changed, and what was declined, is under "Round 4" below.
+
+- v0.6: R-W1-6 delta (2026-11-28). The delta is D-688-2 (§1.4a) and the lines it flags in §1.4,
+  §1.5, §1.6, §4, §5, §6 and §7, with §A.6. Its scoped Codex Gate A review is round 4 (v0.7).
 
 - Round 1 applied 2026-11-27: Codex P1=3 P2=7 P3=2; Opus post-judging P1=1 P2=9 P3=7; rewrite addresses root causes #1 (the classification predicate is `field_valid_for` where `[2b §4.8]` specifies "not defined by the dictionary"), #2 (re-derive recipes that did not reproduce every item the note names), #3 (perf evidence planned through an instrument that cannot time it). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md` (paths from the parent repository's root).
 
 - Round 2 applied 2026-11-27: Codex P1=1 P2=2 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes #1 (an acceptance written ahead of its measurement and outside the PR thread), #2 (the by-value iterator is a public contract change whose attributes, witness and disclosure were not derived from the type), #3 (instruments not shown to be able to report non-zero). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md` (paths from the parent repository's root).
 
 - Round 3 — converged 2026-11-27: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=0 P3=9; no rewrite: a P3 pass applies each finding's mechanical edit (v0.4). Root cause #1: the supersession sweep was keyed on the decisions' topics, not on the declarations they change. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_3_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_3_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+### Round 4 (scoped to D-688-2) — how each finding was applied
+
+| Finding | Where v0.7 answers it |
+|---|---|
+| Codex F-1 (P1; P2 after judging) | §1.4a the encoding (the two `detail` predicates, both sides checked, their witnesses, what has no cell) and the width (why the store is bounded, two rejections); §6 the >4 GiB disclosure; §A.7 |
+| Codex F-3 (P2) | §1.4a cell (b), the moved-from source: parent precondition, exit-code oracle, M4 and M5 re-stated |
+| Codex F-2 (P2; P3 after judging) | §1.4a the layout (both specialisations, `alignof`, release and debug) and the shape (`no_first_unknown_t`); §A.6 |
+| Codex F-4 (P3) | §1.4a "Every pin that could fire": P2 multiline, P5a to P5c, a known positive each, the rule; the holders (the C ABI's `owned_view_`, the generated `owning_<Msg>`) |
+| Codex F-5 (P3, in part) | §A.6's prediction replaced by the pass condition; §1.4a "Where the room is" cites §A.6; §1.5; §4 `B-707-1`; the Decisions row |
+| Codex F-6 (P3) | §5 the concurrency row |
+| Opus O-1 (P3) | §1.4a the shape, the initializer; §A.7 |
+| Opus O-2 (P3) | §1.4a the thread contract and §6: fixpp#736 |
+| Opus O-3 (P3) | §1.4a cell (e): its own binary |
+| Opus O-4 (P3) | §1.4a cell (d) |
+| Opus O-5 (P3) | §1.4a "Comments that change", the new member's comment |
+| Opus O-6 (P3) | §1.4a the C ABI |
+
+One correction beyond the fix list: the layout's baseline was "the merge base", which is `b93b8a28`,
+before D-688-1 deleted `unk_items_`. D-688-2's sizes are compared with the tree before D-688-2
+(§A.6's before-run at `10e73842`).
+
+### Round 4 — disagreements
+
+- **Codex F-1, severity (Codex P1; Opus P2).** The session path cannot reach a table of 2^32 entries
+  (`entry_cap_for` over a `std::uint32_t` limit), and a direct `Parser` reaches it only with a frame
+  whose table already holds truncated offsets (§6). Neither of Codex's counter-proposals is taken: the
+  index plus a `bool` still needs both checks and adds a member, and an entry-count invariant in
+  `build` changes the table's rejection surface and is outside D-688-2 (§1.4a, the width).
+- **Codex F-2, severity (Codex P2; Opus P3).** On clang and gcc a `[[no_unique_address]]` member of a
+  new, distinct empty type adds no byte, so this is a missing measurement, not a defect. Rejected half:
+  the `optional<MessageView<Index>>` probe (§1.4a, the recipe).
+- **Codex F-3, the counter-proposals.** Neither a test-friend seam nor a resetting wrapper type is
+  added: the exit-code oracle makes M5 deterministic with no undefined behaviour, and M4's undefined
+  behaviour is claimed only on the lanes that diagnose it.
+- **Codex F-5, rejected half.** §A.3 to §A.6 are dated run records (date, commit, toolchains), which
+  are provenance, not claims that rot; they stay. Only the results written ahead of a measurement go.
 
 ### Round 3 — how each finding was applied
 
@@ -1942,20 +2152,103 @@ int main() { return kHasTrait ? 0 : 1; }
 | nested (the guard of §2.6) | compiles; exit 1 (trait not found) | compiles; exit 1 |
 | `-DONE_LEVEL` | **error**: "function-like macro 'W1_NOT_A_MACRO' is not defined" | **error**: "missing binary operator before token '('" |
 
-### A.6 `MessageView`'s layout at `10e73842`, before D-688-2 (run 2026-11-28; clang 22.1.2 with libstdc++ 15, gcc 13.3.0 with libstdc++ 13; `-std=c++23 -fsyntax-only -I include`)
+### A.6 `MessageView`'s layout before D-688-2 (run 2026-11-28; clang 22.1.2 with libstdc++ 15, gcc 13.3.0 with libstdc++ 13; `-std=c++23 -fsyntax-only -I include`)
 
-The TU includes `<fixpp/wire/parser.hpp>` and names `sizeof` of `MessageView<access_mode::Index>` and
-`MessageView<access_mode::Iter>`. On clang, `-Xclang -fdump-record-layouts-complete` prints each
-record. On gcc, `template <unsigned long> struct S; S<sizeof(MessageView<access_mode::Index>)> s;` prints
-the size in its error.
+The Index release and debug rows were read at `10e73842`. The Iter, gcc-Iter and `alignof` rows were
+read the same day at `e0b00e52`, whose `src/`, `include/`, `tests/` and `tools/` equal
+`10e73842`'s (`git diff --stat 10e73842 e0b00e52 -- src include tests tools` prints nothing).
+
+The TU:
+
+```cpp
+#include <fixpp/wire/parser.hpp>
+using fixpp::wire::MessageView; using fixpp::wire::access_mode;
+std::size_t a = sizeof(MessageView<access_mode::Index>);
+std::size_t b = sizeof(MessageView<access_mode::Iter>);
+std::size_t c = alignof(MessageView<access_mode::Index>);
+std::size_t d = alignof(MessageView<access_mode::Iter>);
+#ifdef GCC_SIZES
+template <unsigned long, unsigned long, unsigned long, unsigned long> struct S;
+S<sizeof(MessageView<access_mode::Index>), alignof(MessageView<access_mode::Index>),
+  sizeof(MessageView<access_mode::Iter>), alignof(MessageView<access_mode::Iter>)> s;
+#endif
+```
+
+On clang, `-Xclang -fdump-record-layouts-complete` prints each record. On gcc, `-DGCC_SIZES` makes
+the incomplete-type error print `S<…>`.
 
 | | release (`-DNDEBUG`) | debug |
 |---|---|---|
-| `sizeof(MessageView<Index>)`, clang and gcc | 352 | 368 |
+| `sizeof` / `alignof` of `MessageView<Index>`, clang and gcc | 352 / 8 | 368 / 8 |
 | `resolved_application_version_` (1 byte), clang | offset 336 | offset 352 |
 | `dict_owner_` (a pointer), clang | offset 344 | offset 360 |
-| `sizeof(MessageView<Iter>)`, clang | 32 (the three Index-only members empty, at offset 0) | not read |
+| `sizeof` / `alignof` of `MessageView<Iter>`, clang and gcc | 32 / 8 | 40 / 8 |
+| Iter's Index-only members (`table_`, `resolved_application_version_`, `dict_owner_`), clang | empty, at offset 0 | empty, at offset 0 |
 
-A `std::uint32_t` declared right after `resolved_application_version_` falls at offset 340 (release)
-or 356 (debug), inside the 7-byte gap. The same dump after D-688-2 must show that offset and the same
-`sizeof`. MSVC was not run here (§1.4a, the layout).
+**The after-run passes when**, on clang and gcc, in release and in debug, `first_unknown_`'s offset
+lies between `resolved_application_version_`'s and `dict_owner_`'s, and both modes' `sizeof` and
+`alignof` equal this before-run's. MSVC was not run here (§1.4a, the layout).
+
+### A.7 The encoding's predicates and the member's initializer, standalone (run 2026-11-28; clang 22.1.2, gcc 13.3.0; `-std=c++23 -fsyntax-only`)
+
+A mock of the design's pieces, not the real header. Each `-D` switch is a mutant or a rejected form.
+
+```cpp
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <type_traits>
+namespace detail {
+inline constexpr std::uint32_t kFirstUnknownNotComputed = std::numeric_limits<std::uint32_t>::max();
+[[nodiscard]] constexpr bool first_unknown_is_set(std::uint32_t v, std::size_t size) noexcept {
+#ifdef MUT_NE
+    return v <= size;                                   // the != half dropped
+#else
+    return v != kFirstUnknownNotComputed && v <= size;
+#endif
+}
+[[nodiscard]] constexpr bool first_unknown_fits(std::size_t idx) noexcept {
+#ifdef MUT_FIT
+    (void)idx; return true;                             // the store bound dropped
+#else
+    return idx < kFirstUnknownNotComputed;
+#endif
+}
+static_assert(!first_unknown_is_set(kFirstUnknownNotComputed, std::size_t{kFirstUnknownNotComputed} + 1U));
+static_assert(!first_unknown_fits(kFirstUnknownNotComputed));
+static_assert(first_unknown_fits(kFirstUnknownNotComputed - 1U));
+static_assert(first_unknown_is_set(3, 3));
+static_assert(!first_unknown_is_set(4, 3));
+}
+enum class access_mode { Iter, Index };
+template <access_mode Mode> struct MV {
+    struct no_resolved_version_t {};
+    struct no_first_unknown_t {};
+    struct no_dict_owner_t {};
+    using first_unknown_t = std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_first_unknown_t>;
+    static constexpr first_unknown_t not_computed() noexcept {
+        if constexpr (Mode == access_mode::Index) { return detail::kFirstUnknownNotComputed; }
+        else { return no_first_unknown_t{}; }
+    }
+    void* hooks_ = nullptr;
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, std::uint8_t, no_resolved_version_t>
+        resolved_application_version_{};
+#ifdef BAD_INIT        // the uint32_t initializer, instantiated for Iter too
+    [[no_unique_address]] mutable first_unknown_t first_unknown_{std::numeric_limits<std::uint32_t>::max()};
+#elif defined(SAME_TYPE)  // Iter's member reuses no_resolved_version_t
+    [[no_unique_address]] mutable std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_resolved_version_t>
+        first_unknown_{};
+#else
+    [[no_unique_address]] mutable first_unknown_t first_unknown_{not_computed()};
+#endif
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index, void const*, no_dict_owner_t> dict_owner_{};
+};
+MV<access_mode::Index> a; MV<access_mode::Iter> b;
+static_assert(sizeof(MV<access_mode::Index>) == 24);   // the uint32_t sits in the gap before dict_owner_
+static_assert(sizeof(MV<access_mode::Iter>) == 8);     // the empty members add no byte
+```
+
+With no switch it compiles on both compilers. Each of `-DMUT_NE` (the first `static_assert`),
+`-DMUT_FIT` (the second), `-DBAD_INIT` (clang "excess elements in struct initializer", gcc "too many
+initializers") and `-DSAME_TYPE` (the Iter size assertion) fails on both. A 32-bit build was not
+run: `g++ -m32` has no multilib here.
