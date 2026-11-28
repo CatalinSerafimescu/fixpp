@@ -743,10 +743,11 @@ public:
     // merged field store, after any overlay), whether or not a message reaches it; on a
     // hand-built one, a tag some population operation named. A binary search over
     // `defined_tags_`, which `table_view_builder::build() &&` writes in ascending order. No
-    // allocation. Two readers: the validator, which asks only after a tag failed the message's
-    // set; and, since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, R-W1-3), the
-    // inbound parser's `unknown_fields()` through `dict_hooks::for_table_view`, which asks for
-    // every non-framing entry it walks, at each construction of the view and each `++`.
+    // allocation. Not cold for every reader: since W1
+    // (`.specify/688-707-559-wire-headroom-token.md` D-688-1, R-W1-3) the inbound parser's
+    // `unknown_fields()` asks it, through `dict_hooks::for_table_view`, for every non-framing entry
+    // it walks, at each construction of the view and each `++`. Re-derive the readers with
+    // `git grep -n 'tag_defined(' -- include src`.
     [[nodiscard]] bool tag_defined(std::uint16_t tag) const noexcept {
         return std::ranges::binary_search(defined_tags_, tag);
     }

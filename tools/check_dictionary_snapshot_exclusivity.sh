@@ -219,8 +219,9 @@ main() {
     # constructor is user-provided, so its declaration in $HDR is the mint pattern
     # followed by `noexcept {}` (G1_HDR_DECL below matches the whole line). That one
     # line, in $HDR only, is a DECLARATION too and is filtered; a second line of that
-    # form, or any other match in $HDR, still counts. The self-test seeds an extra
-    # mint in $HDR and one in $FACTORY and requires each to fail.
+    # form, or any other match in $HDR, still counts. The self-test's g1_seed_* cases
+    # (tools/test_dictionary_snapshot_exclusivity_gate.sh) seed such matches and require
+    # each to fail.
     G1_MINT='snapshot_key[[:space:]]*(\{[[:space:]]*\}|\([[:space:]]*\))'
     G1_HDR_DECL='^[^:]*:[0-9]+:[[:space:]]*snapshot_key[(][)][[:space:]]+noexcept[[:space:]]*[{][}][[:space:]]*$'
     g1_mint_raw=$(grep -rnE "$G1_MINT" src/ include/ bindings/ tools/ || true)
