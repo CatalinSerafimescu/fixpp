@@ -1,7 +1,7 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.5 — the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
-> Issue-mode design note. No code and no test is written yet. Branch
+> **Status: v0.6: R-W1-6 delta, scoped Codex Gate A review pending (2026-11-28). D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
+> Issue-mode design note. v0.5 (D-688-1, D-707-1/2, D-559-1) is implemented on the branch; D-688-2 is not yet. Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
 >
@@ -24,6 +24,7 @@
 | Id | Issue | Decision |
 |---|---|---|
 | D-688-1 | #688 | `unknown_fields()` becomes the filtered view `[2b §4.8]` specifies: it walks the offset table and allocates nothing, so there is no exhaustion to report. It yields the tags the dictionary does not define (`table_view::tag_defined`), not the tags the MsgType does not declare (R-W1-3). |
+| D-688-2 | #688 (R-W1-6, v0.6) | `MessageView<Index>` remembers where the first unknown entry is: one `std::uint32_t` index into `entries()`, written by the first `unknown_fields()` call over a non-empty table, in existing padding, so later calls start there and the view's size does not change (§1.4a). |
 | D-707-1 | #707 | `group_writer_token` gets 104's shape (a user-provided private copy constructor). `Writer::open_group` builds the `group_writer` itself, because `std::in_place` copies the key outside `Writer`. |
 | D-707-2 | #707 | The census the issue asks for finds `dict::detail::snapshot_key` of the same shape, and W1 fixes it (R-W1-2). It gets a user-provided private default constructor and a user-provided **public** copy constructor, because `std::make_shared` copies it. |
 | D-559-1 | #559 site 1 | Delete `Writer::scratch_mr_` and the constructor's `scratch_mr` parameter. The writer keeps no group bookkeeping, so there is nothing to put on it. W1 closes #559; its fourth site is fixpp#735 (R-W1-1). |
@@ -140,6 +141,11 @@ in 093's bundle as history.
 
 ### 1.4 D-688-1 — the shape
 
+> ⚠️ **Amended in v0.6 by D-688-2 (§1.4a, R-W1-6).** `MessageView<Index>` now stores one index, where
+> the first unknown entry is. Three statements below change, each flagged in place: "The first unknown
+> entry is found when the view is built", "Side effect, stated as a property", and the Cost bullet on
+> a frame with no unknown fields.
+
 - **The view holds its context by value:**
   - the remaining entries, as a pointer pair into the table's `entries()` storage;
   - the frame's base pointer;
@@ -232,7 +238,8 @@ in 093's bundle as history.
     its answer is still true.
   - Rejected: dropping the parameter. That changes the installed `dict_hooks.hpp` and the seam, only
     to save the view's copy of `msg_type`. So the view and its iterator still carry `msg_type`.
-- **The first unknown entry is found when the view is built**, so `begin()` and `empty()` are O(1)
+- **The first unknown entry is found when the view is built** (v0.6: by the first call's scan, and on a
+  later call from the `MessageView`'s stored index, D-688-2), so `begin()` and `empty()` are O(1)
   after construction. `View`'s base keeps its meaning: the bytes of the first unknown field's value, or
   none. The condition is that `View`'s base is not part of `unknown_fields_view`'s contract and no
   test asserts it. A name-based recipe can only support it:
@@ -246,7 +253,9 @@ in 093's bundle as history.
 - **`unknown_fields()` keeps `noexcept`, `[[nodiscard]]`, `[[clang::lifetimebound]]` and its
   `requires(Mode == access_mode::Index)`.** It no longer has a `try`, because nothing in it can throw.
   `begin()` and `end()` lose their `[[clang::lifetimebound]]` (the iterator contract above).
-- **Side effect, stated as a property.** `unknown_fields()` no longer writes any member, so the
+- **Side effect, stated as a property.** ⚠️ *Withdrawn in v0.6 (D-688-2): `unknown_fields()` writes one
+  index, on its first call over a non-empty table; the thread contract is §1.4a's.* The v0.5 text:
+  `unknown_fields()` no longer writes any member, so the
   `mutable` state it shared across `const` calls is gone. Threads calling it on one const view no
   longer write shared state. This note claims nothing wider about sharing a `MessageView` across
   threads.
@@ -263,6 +272,9 @@ in 093's bundle as history.
   unknown entry) and at every `++` (the scan to the next one) (R-W1-5 F2).
 - After D-688-1, building the view scans as far as the first unknown entry, and every full iteration
   classifies each remaining entry again. A frame with no unknown fields is scanned whole on each call.
+  ⚠️ *v0.6 (D-688-2): the scan to the first unknown entry, or the whole-table scan of a frame with
+  none, runs on the first call only; later calls start at the stored index. Iteration past the
+  first unknown entry still classifies (§1.4a, the expected bench effect).*
 - **What one classification does changes; whether it gets cheaper is measured, not claimed.**
   - `field_valid_for` hashes `msg_type` into `valid_` and then probes that MsgType's set, once for
     each entry it classifies. The validator hoists that hash (the "Hot-path hoist" comment on
@@ -345,6 +357,352 @@ in 093's bundle as history.
     shared row can pass the band on layout alone; such a row is still posted, with the local A-A
     spread beside it.
 
+### 1.4a D-688-2 — the first-unknown index (v0.6, R-W1-6)
+
+**The ruling.** R-W1-6 (owner, option A): the `MessageView` remembers where the first unknown entry
+is, computed on the first `unknown_fields()` call and stored without allocation, so later calls start
+there instead of rescanning the frame. It is a design choice, not a ratification of any figure
+(R-W1-4 still applies; "Expected bench effect" below). Every other clause of D-688-1 stands; the
+three §1.4 statements this one changes are flagged there.
+
+**The shape.**
+- `MessageView<Index>` gains one private member, `first_unknown_`: an index into `table_.entries()`.
+  - Index mode only, as `resolved_application_version_` and `dict_owner_` are:
+    `[[no_unique_address]] std::conditional_t<Mode == access_mode::Index, std::uint32_t, no_first_unknown_t>`,
+    `mutable` because `unknown_fields()` is `const`.
+  - Declared immediately after `resolved_application_version_` (the layout, below).
+- **The encoding, one sentinel.**
+  - **"Not computed yet"** is `std::numeric_limits<std::uint32_t>::max()`, the default member
+    initializer.
+  - A value `v <= entries().size()` is computed: `v < size()` is the first unknown entry's index;
+    **"none"** (the frame has no unknown field) is `v == size()`, the end index. That is what
+    `unknown_fields_view::next_unknown` returns when it finds nothing (`first == s.end`), so "none"
+    needs no second magic value.
+  - So one test, `first_unknown_ <= entries().size()`, means "computed"; anything above the size,
+    the sentinel included, means "not computed" (the moved-from source, below).
+- **`unknown_fields()`, in order** (the order matters: step 2 comes before step 3, so a moved-from
+  source reads its stale index through the guard, and test (b)'s mutants can show):
+  1. `check_alive()`, as now, before anything is read.
+  2. `ents = table_.entries()`. If `first_unknown_ <= ents.size()`, build the view through
+     `unknown_fields_view`'s private constructor
+     (`unknown_fields_view(scan_state, entry const* first, generation_token)`; `MessageView` is its
+     friend) at `ents.data() + first_unknown_`. No classify call is made. Re-entering `scan` at that
+     index would classify the cached entry once more, and test (a) below pins that it does not.
+  3. Otherwise, if `ents` is empty, return the view of an empty range and write nothing (the shared
+     empty view, under the thread contract below). The scan there is O(1) anyway. A default-constructed
+     view holds the sentinel, so it reaches this step and is only ever read.
+  4. Otherwise run `scan` from `ents.data()` as today, store the found entry's index, and return
+     that view.
+- **Representation: an index, not an `entry const*`. The ruling's premise does not hold in source.**
+  - R-W1-6 says "a copied MessageView copies its OffsetTable". Read at `10e73842`: `MessageView`'s
+    copy constructor and copy assignment are `= delete`, and so is its move assignment; only its
+    move constructor is `= default` (`include/fixpp/wire/parser.hpp`, the special-member block whose
+    comment begins "Move-only (move-CONSTRUCTION only"). `OffsetTable`'s copy is deleted as well, and
+    its move is defaulted (`include/fixpp/wire/offset_table.hpp`, "389: COPY IS DELETED"). So no
+    copied view exists.
+  - **The copy sites re-parse.** `dict::reify`'s factory and `fixpp_msg_clone` build a new
+    `MessageView` over their own bytes with `parser.parse(…, view.offsets().config())`
+    (`src/dictionary/reify.cpp`, `src/capi/message_write.cpp`), so a copy starts "not computed".
+  - **Move construction is the one way a set index travels.** The defaulted move copies the member.
+    `std::pmr::vector`'s move constructor copies the allocator and takes the source's buffer, so in
+    the destination the index still names the same entry. So would a pointer.
+  - **The reasons the index is chosen:**
+    - it can be checked against `entries().size()`, which is what makes the moved-from source
+      safe. A pointer carried into the moved-from source points into the buffer the destination now
+      owns, and nothing in the source can check it;
+    - 4 bytes fit existing padding, and 8 do not (the layout, below);
+    - it is a function of the entries alone, so it stays right if their storage ever moves.
+- **The width: `std::uint32_t`.**
+  - `std::uint16_t` cannot hold every index. The session's entry cap is
+    `parse_capacity::entry_cap_for(limit)`, `limit / 3 + 1` (`src/session/parse_capacity.hpp`),
+    and `default_max_frame_bytes` is 256 KiB (`include/fixpp/wire/framer.hpp`), so the default
+    session cap is past 65535. A direct `Parser` user sets `OffsetTable::Config::max_offset_entries`,
+    a `std::size_t` with no clamp: the only bound is `OffsetTable::build`'s
+    `entries_.size() >= cfg_.max_offset_entries` check.
+  - `std::uint32_t` is the width the table already uses for an entry index: `overlay_` is a
+    `std::pmr::vector<std::uint32_t>` whose slots hold `static_cast<std::uint32_t>(e) + 1U`
+    (`OffsetTable::build`), and `entry::offset` is a `std::uint32_t`.
+  - **The condition the encoding needs:** `entries().size() < UINT32_MAX`, so that the sentinel is
+    never a computed value. Each entry takes at least two frame bytes (`build` rejects an empty tag
+    and a missing `=`), and `entry::offset` must hold every value offset. So every table within
+    the table's own condition has fewer than 2^31 entries.
+- **The moved-from source.** After the defaulted move both objects hold the index. The source's
+  entries are valid but unspecified; libstdc++, libc++ and the MSVC STL leave a move-constructed-from
+  vector empty. Through the guard of step 2, an index above the source's size reads as "not computed",
+  so the source rescans what it holds (an empty table: step 3, no write). The guard is exact while a moved-from vector holds either the
+  source's elements or none, and nothing can change the source's entries after the move (the
+  invalidation, below).
+  - Rejected: a member type whose move constructor resets the source. It works, but it adds a type
+    for a state the one comparison already covers.
+
+**Invalidation: the index stays valid for the view's whole life.** It memoises
+`next_unknown(entries().data(), …) - entries().data()`, a function of the entries, the classify hook
+and its dictionary pointer (both in `hooks_`), `msg_type()` (read from the entries and the frame)
+and the dictionary's answers. Each is fixed after construction:
+- **`entries()`.** `entries_` is written only in `OffsetTable::build`, which is private and called
+  only from `OffsetTable`'s constructors (`git grep -n -E '\bbuild\(' -- src/wire/offset_table.cpp`).
+  `entries_` is not `mutable`, and `src/wire` and `include/fixpp/wire` have no `const_cast`
+  (`git grep -n const_cast -- src/wire include/fixpp/wire` prints nothing). `group_index_link` is
+  written only by `build`'s `emplace_back` (`git grep -n group_index_link -- src include`).
+  - The lazy state lives in other members and does not touch `entries_`. The group context is written
+    by `set_group_context` from every `group<>()`. `group_index_` gains its rows on a slice read.
+    `nested_cache_` holds sub-tables that `build_nested_subview` places in the arena, each an
+    `OffsetTable` with its own entries.
+  - `table_` is never replaced: `MessageView`'s move assignment is deleted, and `offsets()` returns
+    `OffsetTable const&`. There is no in-place re-parse.
+- **`hooks_`.** Set only in `MessageView`'s constructor initializers
+  (`grep -n 'hooks_ =' include/fixpp/wire/parser.hpp` prints nothing). `Parser::parse` writes
+  `dict_owner_` after construction, and `message_view_resolved_access` writes the resolved
+  version. Neither touches `hooks_`.
+- **The dictionary.** `table_view`'s population surface (`mark_defined`, `add_valid_tag`,
+  `add_fixt_framing_tag`) is private since fixpp#456 and reached only through
+  `table_view_builder`, so a published table's `tag_defined` answers are fixed. D-688-1's condition,
+  that the dictionary outlives every iteration, already covers the index.
+- **So nothing resets the index.** There is no copy and no assignment to reset it for, and the move
+  is covered by the guard. A test-seam bundle (`dict_hooks_test_access::make`) whose classify answer
+  changes between calls would see the index from its first answer. Production bundles come only from
+  `dict_hooks::for_table_view` and `none()`.
+
+**The thread contract.**
+- **It is documented, and the index sits inside it.** `.specify/2b-wire.md` §6.6, "Threading":
+  "`Parser`, `Writer`, `OffsetTable`, `MessageView`, `Validator` are value types … Safe on a
+  single thread; not synchronized for concurrent access." Two other places carry it:
+  - the live B&L's `B-003-4` (an `owning_<Msg>` is single-strand). The reason it gives, the lazy
+    `view()` cache, is no longer the mechanism (`owning_message_handle::impl::view_cache_` is filled
+    eagerly since fixpp#458 D-4), but the view's own caches keep the contract true;
+  - `include/fixpp/wire/view.hpp`'s generation registry, "Single-thread-per-session".
+- **What the existing caches already impose.** `group<>()` calls `set_group_context` on every call,
+  which writes the `mutable` `group_ctx_msg_type_`, `group_ctx_parent_path_` and
+  `group_ctx_depth_`. A slice read can append to `group_index_`, and `nested_group_slices` to
+  `nested_cache_`. So two threads reading one view through `group<>()` already race. The index is
+  state of the same kind, under the same contract, and adds no hazard the contract permits.
+- **Against v0.5 and against the base.** D-688-1's "Side effect, stated as a property" (that
+  `unknown_fields()` writes no member) is withdrawn: it writes the index once, on the first call over
+  a non-empty table. Against the base (`b93b8a28`), which wrote `unk_items_` and
+  `unk_items_built_` on the first call, nothing changes.
+- **One place where the library itself shares a view across threads: `kEmpty`.**
+  `owning_message_handle::view()` (`src/dictionary/reify.cpp`) returns one function-local
+  `static MessageView<Index> const kEmpty` for every null (for example moved-from) handle, on every
+  thread. Two threads, each holding its own empty handle, reach one `MessageView`. Step 3's rule
+  (nothing is written over an empty table) keeps `unknown_fields()` from writing it, because
+  `kEmpty`'s table is default-constructed and empty. Test (e) pins the rule.
+  - **Disclosed, not fixed here:** `group<>()` on `kEmpty` already writes `set_group_context`'s
+    members (read). Whether a declined slice read on its empty table also memoises a row in
+    `group_index_` was not traced. This predates W1 and is outside it. It goes to the orchestrator
+    to be filed.
+- **The C ABI does not reach the index.** No C symbol calls `unknown_fields()`
+  (`git grep -n unknown_fields -- src` finds one comment, in `src/capi/message_write.cpp`), so
+  `B-051-2`'s THREAD_SAFE clone reads are untouched.
+- **No test reads one `MessageView` from two threads.**
+  - `tests/dictionary/reify_shared_table_concurrency_test.cpp` reads two reify handles, `ha` and
+    `hb`, each over its own `MessageView`, one handle per thread. With the index, each thread's
+    first call writes its own view's index, so the TSan cell stays clean.
+  - Only `unknown_fields()` writes the index, so the instrument is the threaded tests that call it:
+    `git grep -l -E 'std::(j)?thread' -- tests | xargs grep -l unknown_fields`. Its known positive,
+    `reify_shared_table_concurrency_test.cpp`, is the only file it printed at `10e73842`. So no test
+    calls `unknown_fields()` on one view from two threads. This note claims nothing about the other
+    threaded tests' use of a view.
+- **Rejected: `std::atomic<std::uint32_t>`.** It would make this one accessor safe while
+  `group<>()` stays unsynchronised, so it buys no contract. And `std::atomic` is neither copyable nor
+  movable, so `MessageView`'s defaulted move constructor would become deleted.
+- **B&L:** no new row. `B-688-1` gains one sentence citing `[2b §6.6]` (§4).
+
+**The layout. The design requires that `sizeof(MessageView<…>)` does not change.**
+- **Where the room is.** On clang and gcc (§A.6), `resolved_application_version_` (an
+  `application_version`, `std::uint8_t`-based) is followed by `dict_owner_`, a pointer, with 7
+  bytes of padding between them in release and in debug. A `std::uint32_t` declared right after
+  `resolved_application_version_` lands in that padding, 4-aligned, so the size does not change.
+  Declared anywhere else, for example last, it adds 8 bytes. So the declaration order is part of the
+  design.
+- **MSVC (reasoned, not measured).** x64 MSVC uses the same natural-alignment rule. `hooks_` ends on
+  an 8-byte boundary and the 1-byte member is followed by an 8-aligned pointer, so the same gap exists
+  in debug and release, whatever the STL's container sizes are.
+  - MSVC ignores `[[no_unique_address]]`, and `include/` has no `msvc::no_unique_address`
+    (`git grep -n 'msvc::no_unique_address' -- include` prints nothing). So in `MessageView<Iter>`
+    the new empty member is one more byte beside the two empty members already at its tail, within the
+    tail padding.
+  - Measured at the `-k 0` MSVC build of the touched targets: one TU compiled with
+    `/d1reportSingleClassLayoutMessageView`, against the same at the merge base.
+- **The re-derive recipe, run before and after on each toolchain.**
+  - clang: `clang++ -std=c++23 -fsyntax-only [-DNDEBUG] -I include -Xclang -fdump-record-layouts-complete <a TU that includes fixpp/wire/parser.hpp and names sizeof(MessageView<access_mode::Index>)>`.
+    Read the `MessageView<Index>` record: `first_unknown_`'s offset falls between
+    `resolved_application_version_`'s and `dict_owner_`'s, and `sizeof` equals the merge base's.
+  - gcc: `template <unsigned long> struct S; S<sizeof(MessageView<access_mode::Index>)> s;`. The
+    incomplete-type error prints the size.
+  - MSVC: the bullet above.
+- **Every pin that could fire.** Each is re-derived over
+  `tests include src bindings bench tools perf`, with `':!.specify/688-707-559-wire-headroom-token.md'`
+  so that no recipe matches this note:
+  - (P1) `git grep -n -E 'sizeof ?\([^)]*\b(MessageView|unknown_fields_view|OffsetTable)\b' -- …`
+  - (P2) `git grep -n -E 'static_assert.*(MessageView|unknown_fields_view)' -- …`
+  - (P3) `git grep -n -E '(offsetof|alignof) ?\([^)]*(MessageView|OffsetTable|unknown_fields_view)' -- …`
+  - (P4) `git grep -n kParseContainers -- .`
+  - (P5) holders by value: `git grep -n -E '(optional|expected_t|unique_ptr)<\s*(fixpp::)?(wire::)?MessageView' -- src include tests`
+    and `git grep -n -E 'MessageView<[^>]*>\s+[a-z_]+_\s*(;|\{|=)' -- src include`.
+  - **Known positive:** P1 prints the `sizeof(OffsetTable::entry)` pins (`tests/wire/offset_table_test.cpp`
+    among them), so it can report a pin.
+
+  **What each kind of hit does under D-688-2**, as read at `10e73842`:
+  - **The codegen flyweight pin** (`tests/codegen/accessor_resolution_census_test.cpp`,
+    `sizeof(NewOrderSingle) == sizeof(MessageView<…> const*)`) is a pointer: unchanged.
+  - **`tests/wire/parser_index_test.cpp`**, `is_move_constructible_v` and
+    `!is_move_assignable_v`: unchanged. A `std::uint32_t` member keeps the defaulted move
+    constructor, and the design relies on both pins.
+  - `include/fixpp/wire/message_view_contract.hpp` (`is_base_of_v`),
+    `tests/wire/noexcept_trap_test.cpp` (`get_decimal`'s `noexcept`), and
+    `tests/wire/type_shape_pins_test.cpp` (`unknown_fields_view`'s constructibility pins):
+    unchanged. D-688-2 adds no member and no constructor to `unknown_fields_view`.
+  - **Every `sizeof(OffsetTable)` band** (`tests/capi/message_read_failloud_test.cpp`,
+    `tests/wire/group_view_failloud_test.cpp`, `tests/wire/nested_group_slices_failloud_test.cpp`,
+    `tests/support/group_read_100.hpp`, `tests/wire/test_100_group_read_status.cpp`,
+    `build_nested_subview`'s allocation in `src/wire/offset_table.cpp`): unchanged.
+    - The index lives in `MessageView`, not in `OffsetTable`. That is a requirement: in
+      `OffsetTable` it would move every band calibrated to its size, and each nested sub-table would
+      carry an index nothing reads.
+  - The `OffsetTable::entry` and `Config` pins: unchanged.
+  - **`kParseContainers`** (`src/session/parse_capacity.hpp` and the test's own copy in
+    `tests/session/inbound_frame_dispositions_test.cpp`): unchanged. No container is added, and the
+    member is not in the parse resource.
+  - **The holders:** `owning_message_handle::impl`'s `std::optional<MessageView>` (in the caller's
+    `mr`), `src/capi/message_write.cpp`'s `std::unique_ptr<MessageView>`, and the tests'
+    `std::optional` holders. None has a size pin. No C-ABI struct holds a `MessageView`:
+    `<fix/c_api.h>` exposes no wire type (`[2b §5]`).
+  - `bindings/`, `tools/` and `perf/`: no hit for any recipe.
+
+**Behaviour: unchanged for every frame.**
+- What `unknown_fields()` yields is unchanged. The stored index is the value `scan` finds, a pure
+  function of inputs that are fixed for the view's life (the invalidation, above), and the view built
+  at it equals the one `scan` builds.
+- The every-field and allocation-free properties, and Q-32 (an exhausted arena still yields every
+  unknown field), are unchanged. The index is a member of the `MessageView` object, never in the
+  parse resource; the view stores no list.
+- **The generation check is unchanged.** `unknown_fields()` still calls `check_alive()` first,
+  before it reads the entries or the index, and the iterator's checks are as in §1.4.
+
+**Expected bench effect, stated as an expectation and measured, not claimed.** The case names are
+`bench/wire/parser_bench.cpp`'s `BM_UnknownFields_*`.
+- **`EmptyOnFrameWithNone`:** after the first call, each call is the guard's comparison and the
+  view's construction. The whole-table scan goes.
+- **`RepeatedCalls`:** the frame is the 20-tag body with three trailing undefined tags. The rescan of
+  the known prefix goes. Each call still iterates: the entries after the first unknown one are
+  classified, and the checksum is skipped by the framing test. So it falls, and stays above the
+  base's figure, because the base iterated a stored list.
+- **`RepeatedIterationOfOneView`:** no change expected. The view is built once, outside the timed
+  loop, and each `++` classifies the next entry.
+- **`SinglePassAfterParse`:** one store more on the first call.
+- **The parse path** (`BM_Parser_Index_20tag`, `BM_Parser_Index_200tag`): each `MessageView`
+  construction initialises one more member, the move into `core::expected_t` copies it, and code
+  layout moves, so these rows are re-measured as well.
+- **The procedure** is §1.4's, in full, after D-688-2 is implemented: the A-B-A-B run with the base
+  worktree at a path padded to the candidate root's length, the A-A control with its `.text`
+  comparison, and every row, the shared parse rows included. The run replaces the earlier figures for
+  every row. Each row past `[const §VIII.2]`'s band goes to the PR thread with its figures, and the
+  owner's ratification there is a merge condition (R-W1-4, R-W1-6).
+
+**Tests (RED first; each names the mutant it kills).** Cells (a) to (d) are in
+`tests/wire/unknown_fields_test.cpp` (the grouped wire bucket). They build the view with the
+three-argument `MessageView(frame_view const&, memory_resource*, dict_hooks)` constructor over a
+bundle from `tests/support/dict_hooks_test_access.hpp`'s `make`:
+- the classify stub counts its calls through the `opaque_dict` it is given, a test-local object
+  with a `mutable` counter;
+- the group hooks are null, which the frames below do not need.
+
+`tests/wire/unknown_fields_dict_test.cpp` loads a real XML dictionary through `Parser{tv}`, and
+`Parser` takes only a `table_view`, so a counting hook cannot go through it.
+- **(a) The second call makes no classify call before the first unknown entry.**
+  - The frame has at least two defined non-framing tags before its first undefined one, then two
+    undefined ones: for example `35=D`, `34=1`, `55=X`, `5000=a`, `5001=b`. The stub answers
+    "defined" for tags below 5000.
+  - The expected count of the first call is derived in the cell from `offsets().entries()`: the
+    non-framing entries up to and including the first undefined one. It is not hard-coded.
+  - Then the counter is reset, `unknown_fields()` is called again together with `empty()` and
+    `begin()`, and the counter must be **exactly 0**.
+  - A full iteration then makes exactly as many calls as there are non-framing entries after the
+    first unknown one.
+  - RED on the branch before D-688-2: the second call reclassifies the prefix.
+  - Mutants:
+    - M1, the index never stored: RED;
+    - M2, stored but never read (always rescan): RED;
+    - M3, re-entering `scan` at the index: 1 call, so RED, because the assertion is exact.
+- **(b) Moves; there are no copies.**
+  - **Pin the premise:**
+    `static_assert(!std::is_copy_constructible_v<MessageView<access_mode::Index>> && !std::is_copy_assignable_v<MessageView<access_mode::Index>>)`,
+    in `tests/wire/parser_index_test.cpp` beside the move pins. No such pin exists today
+    (`git grep -n -E 'is_copy_(constructible|assignable)_v<\s*(fixpp::wire::)?MessageView' -- tests`
+    prints nothing). The index design relies on the deletion. Its RED is a user-provided copy
+    constructor on `MessageView`.
+  - **Move with the index set, and with it unset.** The source is held as
+    `std::optional<core::expected_t<MessageView<Index>>>`. In one arm `unknown_fields()` is called
+    first, so the index is set; in the other it is not.
+    - `MessageView<Index> b{std::move(**src)}`.
+    - `b` yields the source's (tag, value) list from before the move, also after the source is
+      destroyed with `src.reset()`. `b` owns the buffer after the move.
+  - **The moved-from source**, run inside `EXPECT_EXIT(…, ::testing::ExitedWithCode(0), "")` so that
+    a mutant's crash fails this cell and not the whole bucket: its `unknown_fields()` terminates and
+    yields no more fields than its own `offsets().entries().size()`.
+    - M4, `first_unknown_ != sentinel` in place of `first_unknown_ <= entries().size()`: the source
+      builds its view at `data() + k` over its empty table, with `k > 0` because entry 0 is the
+      framing tag 8. Reading it runs past the table: RED by crash on every lane.
+    - M5, an `entry const*` in place of the index: the source's pointer points into `b`'s buffer
+      while its end is its own empty table's. The scan runs away: RED by crash, and ASan names the
+      read. M5 also shows in §A.6's re-run: a pointer does not fit the 7-byte gap, so the size grows
+      by 8.
+    - Both mutants show only because step 2 precedes step 3. With the empty-table test first, the
+      source would never read its index, and this arm could not fail.
+  - **The copy sites are re-parses.** `dict::reify` of a source whose index is set; the source
+    frame and arena are then destroyed, and the handle's `view().unknown_fields()` yields the same set
+    (`tests/dictionary/`, next to the reify cells). It is a regression cell, not RED-first: reify
+    re-parses by construction (`src/dictionary/reify.cpp`), so no D-688-2 mutant can turn it RED. It
+    fails only if a later change ever reused the source's storage (ASan). The C-ABI clone is not
+    given a cell, because no C symbol reads unknown fields.
+- **(c) A frame with no unknown field.** The stub answers "defined" for every tag.
+  - The first call classifies every non-framing entry.
+  - Every later call: `empty()` is true, and the counter stays at **0**.
+  - M6, only an index below the size stored and "none" left as "not computed": RED.
+- **(d) The allocation cells stay green, with the second call inside their window.**
+  - `WireUnknownFieldsQ32.ExhaustedArenaStillYieldsEveryUnknownFieldWithNoUpstreamRequest` and
+    `WireUnknownFields.ReadingTheUnknownFieldsDrawsNothingFromTheParseResource` each gain a second
+    `unknown_fields()` call and iteration inside the counted window, so the cached path runs under
+    the same counter.
+  - M7, the index kept in a container on the parse resource: RED by the parse-resource counter.
+- **(e) The shared empty view is never written.** In
+  `tests/dictionary/reify_shared_table_concurrency_test.cpp` (standalone, a TSan target):
+  - two null handles (each moved from);
+  - **precondition:** `&ha.view() == &hb.view()` (the same `kEmpty`), so the instrument can see a
+    race;
+  - two threads each loop on `h.view().unknown_fields().empty()`.
+  - M8, the index written over an empty table: TSan reports a race on `first_unknown_`. That is RED
+    on the TSan lane only; on other lanes the cell is green either way, and that is stated with it.
+
+**Comments that change** (re-derive with
+`git grep -n -i -E 'stores? (and allocates )?nothing|nothing is stored|writes no member' -- include/fixpp/wire tests/wire tests/dictionary spec/behaviors-and-limitations.md .specify/2b-wire.md brain/components/wire.md`,
+then keep the hits about `unknown_fields`; `parser.hpp`'s "an Iter view stores nothing", about
+`resolved_application_version_`, stays true):
+- **`include/fixpp/wire/parser.hpp`, the comment above `unknown_fields()`.** "It stores and
+  allocates nothing, so no state of the parse resource changes what it yields" becomes: "It allocates
+  nothing, so no state of the parse resource changes what it yields. The view stores no list; this
+  MessageView stores one index, where the first unknown entry is, written by the first call over a
+  non-empty table, and later calls start there (D-688-2)." "The view copies its context out of this
+  MessageView, not a pointer to it" stays true.
+- **`include/fixpp/wire/parser.hpp`, the new member's comment.** It states the encoding (the
+  sentinel, "none" as the end index), the guard and why it covers a moved-from source (and why it is
+  tested before the empty-table rule), the rule that nothing is written over an empty table (the shared `kEmpty`), the placement in the padding, and the
+  thread contract (`[2b §6.6]`: one view, one thread at a time).
+- **`include/fixpp/wire/unknown_fields.hpp`, the file header.** "It stores nothing: it holds the
+  remaining offset-table entries, …" becomes "The view stores no list: it holds the remaining
+  offset-table entries, …", and the header adds that the `MessageView` which builds it keeps one index,
+  where the first unknown entry is (D-688-2).
+- **`include/fixpp/wire/unknown_fields.hpp`, the private constructor's comment.** "The first unknown
+  entry is found here, so begin() and empty() are O(1)" becomes "The first unknown entry is found
+  before construction, by scan() on a MessageView's first call or from its stored index on a later
+  one, so begin() and empty() are O(1)".
+- **`tests/wire/unknown_fields_test.cpp`**: the file header's "and stores nothing, so the parse
+  resource's state cannot change what it yields", and the Q-32 block's "unknown_fields() stores
+  nothing". Both become "allocates nothing".
+- **`tests/dictionary/reify_shared_table_concurrency_test.cpp`**: "its unknown fields classify on
+  every iteration" stays true and gains "and the view remembers where the first one is (D-688-2)".
+- The live B&L `B-688-1` (§4), and `[2b §4.8]`'s as-built line (§6).
+
 ### 1.5 API, C ABI and layout
 
 - **C ABI: no change.** No C symbol, struct, constant, error code or documented result moves. No C-ABI
@@ -381,6 +739,9 @@ in 093's bundle as history.
     is a pointer, so it is untouched.
     - **Known positive:** the same pattern with `OffsetTable::entry` in place of the three names
       prints hits, `tests/wire/offset_table_test.cpp` among them, so the pattern can report a pin.
+  - **D-688-2 (v0.6):** `MessageView<Index>` gains `first_unknown_`, declared in existing padding, so
+    its size does not change on clang and gcc (§A.6), and MSVC is measured at its `-k 0` build. The
+    whole-repo pin recipes and each hit's disposition are §1.4a's "The layout".
 - **B(L)'s `kParseContainers` counts the `pmr::vector` members `MessageView<Index>` and `OffsetTable`
   construct from the parse resource**, times the view's moves (its recipe is the comment above it in
   `src/session/parse_capacity.hpp`).
@@ -547,6 +908,8 @@ in 093's bundle as history.
    `tag_defined` is true for them. The 10-minute PR campaign runs on it.
 8. **Bench**: the `bench/wire` cases of §1.4, timed by the transplanted A-B-A-B run, and CI's paired
    rows.
+9. **D-688-2 (v0.6):** the cells (a) to (e) of §1.4a, "Tests", RED first, each with its mutant. The
+   bench of item 8 is re-run in full after D-688-2 (§1.4a, "Expected bench effect").
 
 ---
 
@@ -958,6 +1321,24 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
     temporary view is valid, and clang no longer diagnoses one taken through a temporary
     `MessageView` (`parse(…)->unknown_fields().begin()`), which dangles. `unknown_fields()` keeps
     its own attribute.
+- **Amended in v0.6 (D-688-2): `B-688-1`**, which the W1 implementation has already written into the live
+  file:
+  - "Nothing is stored, so no state of the parse resource changes what it yields" becomes: "It
+    allocates nothing, so no state of the parse resource changes what it yields. The view stores no
+    list; the `MessageView` stores one index, where the first unknown entry is, written by the first
+    call over a non-empty table."
+  - Its Cost bullet's "a second `unknown_fields()` call classifies again, and `empty()` on a frame
+    with no unknown field scans the whole table" becomes: "the first `unknown_fields()` call
+    classifies as far as the first unknown entry and remembers where it is, so a later call makes no
+    classification before it, and `empty()` is O(1) after the first call. Each iteration still
+    classifies every entry after the first unknown one."
+  - It gains a threading sentence: "One `MessageView` is read by one thread at a time (`[2b §6.6]`).
+    The first `unknown_fields()` call writes the index, as `group<>()` writes the view's group
+    context. A null reify handle's shared empty view is never written by `unknown_fields()`."
+- **Amended in v0.6 (D-688-2): `B-707-1`.** Its `parser.hpp` bullet gains: "`MessageView<Index>`
+  gains `first_unknown_`, placed in existing padding, so its size does not change on clang and gcc;
+  `MessageView<Iter>` gains an empty member." The MSVC size is the one read at its `-k 0` build. The
+  re-derive recipe stays.
 - **New: `B-559-1` (BREAKING, C++ only).** `wire::Writer` is constructed from its destination buffer
   alone. It allocates nothing, with or without groups. C ABI: none. The layout is `B-707-1`'s.
 - **New: `B-707-1`, one layout row in `B-104-7`'s shape.**
@@ -982,9 +1363,9 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 | Trigger | Touched | By |
 |---|---|---|
 | public C++ API or C ABI | **yes**, the C++ API only | D-688-1 (`unknown_fields_view`, `MessageView` layout); D-559-1 (`Writer`'s constructor); D-707-1/2 (the keys' copy constructors) |
-| the parser | **yes** | D-688-1 (`MessageView::unknown_fields`) |
-| wire format or codegen layout | no | Bytes on the wire do not change, and the emitted flyweights hold a pointer. |
-| concurrency, session FSM, store, security | no | D-688-1 removes a `mutable` write; it adds no synchronisation. |
+| the parser | **yes** | D-688-1 (`MessageView::unknown_fields`); D-688-2 (`MessageView<Index>`'s layout: one member, the first-unknown index) |
+| wire format or codegen layout | no | Bytes on the wire do not change, and the emitted flyweights hold a pointer. D-688-2's layout change is the parser's (row above). |
+| concurrency, session FSM, store, security | no | D-688-1 removes a `mutable` write. D-688-2 adds one back: one index, written once, inside `[2b §6.6]`'s one-thread contract and never over an empty table (§1.4a). Neither adds synchronisation. |
 | a new `.specify/` design document | **yes** | this note |
 
 **The four Appendix A controls apply, with no reading of `[const §X.6]` needed.**
@@ -993,6 +1374,10 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 - Their state, in the shape of `.specify/563-564-callback-send.md` §0a:
   - **Codex Gate A:** this loop. Round 1 is applied in v0.2, round 2 in v0.3, and round 3, the converged round, in v0.4
     ("Gate A").
+  - **Codex Gate A, v0.6:** R-W1-6's new member changes the parser's layout, which is Appendix A's
+    trigger ("touches the wire format, parser, or codegen layout"). So the D-688-2 delta gets one
+    scoped Codex Gate A review before implementation, as the amended clauses of v4.1 to v4.4 did. It
+    is **pending**. The delta is §1.4a and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7.
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
   - **`/analyze`:** by the spec-analyzer over the converged v0.4 note, after Gate A and before
     implementation. Its findings and their dispositions are R-W1-5 in the rulings record, and v0.5
@@ -1099,6 +1484,19 @@ Re-run each recipe at implementation and disposition every hit.
   F4): it is proposed to the owner at close-out (row 15), as anti-pattern candidates always are, and
   lands only on that approval.
 
+- **D-688-2 (v0.6).** Re-run §1.4a's comment recipe at implementation, and disposition every hit.
+  - **Code and test comments:** the ones §1.4a lists under "Comments that change".
+  - **Amend in place:** `.specify/2b-wire.md` §4.8's "as built since W1" line gains: "`MessageView<Index>`
+    remembers where the first unknown entry is, so a later `unknown_fields()` call does not rescan the
+    frame (D-688-2)". §6.6's "Threading" needs no edit: it already states the contract the index
+    relies on.
+  - **brain `components/wire.md`:** the locked-decisions row for `[2b §4.8]` ("as a filtered view")
+    gains "the `MessageView` keeps one index, where the first unknown entry is (D-688-2)", and its
+    "materialising a vector" rejection stays true: the index allocates nothing.
+  - **The live B&L:** `B-688-1` and `B-707-1` (§4).
+  - **Disclosed for filing, not edited here:** `group<>()` writes `set_group_context`'s members on
+    the shared `kEmpty` of `owning_message_handle::view()` (§1.4a, the thread contract).
+
 ## 7. Rulings applied (no open design question)
 
 v0.1's Q-1 and Q-2 are answered. The rulings record (`decisions/speckit/pr-w1-688-707-559-owner-rulings.md`
@@ -1125,6 +1523,12 @@ delegation, flagged for the owner's review at merge.
   `parser_bench`, with no manifest change (§1.4). E1: one MSVC target list (§2.6 item 4). F1: the
   `tag_defined` comment and brain `dictionary.md`'s rationale (§6). The LOWs A1, A2, B2, B3, C3, C4,
   C5, E2, F2 and F3 are applied where each names; F4: the class-24 edit is not in this PR (§6).
+- **R-W1-6 (owner, 2026-11-28, "unknown_fields() - A"):** applied in v0.6 as D-688-2 (§1.4a). The
+  `MessageView` remembers where the first unknown entry is, with no allocation. It ratifies no
+  figure: the paired run is repeated in full and R-W1-4's PR-thread route applies to every over-band
+  row. One correction to the ruling's text: its reason for an index, "a copied MessageView copies its
+  OffsetTable", does not hold, because both copies are deleted. The index stands for the reasons
+  §1.4a gives: a moved-from source, the padding, and a bounds check.
 
 No technical question is left open. One owner act may be needed later, and it is conditional: the
 PR-thread ratification of an over-band bench row, if the measurement produces one. `[2b §4.8]`, R-W1-3 and the correctness rule settle #688. The
@@ -1133,6 +1537,10 @@ over-band row, the PR does not merge, and #688 returns to Gate A with Option A a
 alternative (§1.4).
 
 ## Gate A
+
+- v0.6: R-W1-6 delta, scoped Codex Gate A review pending (2026-11-28). The delta is D-688-2 (§1.4a)
+  and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7, with §A.6. The review is scoped to
+  that delta; the converged rounds below are not reopened.
 
 - Round 1 applied 2026-11-27: Codex P1=3 P2=7 P3=2; Opus post-judging P1=1 P2=9 P3=7; rewrite addresses root causes #1 (the classification predicate is `field_valid_for` where `[2b §4.8]` specifies "not defined by the dictionary"), #2 (re-derive recipes that did not reproduce every item the note names), #3 (perf evidence planned through an instrument that cannot time it). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md` (paths from the parent repository's root).
 
@@ -1533,3 +1941,21 @@ int main() { return kHasTrait ? 0 : 1; }
 |---|---|---|
 | nested (the guard of §2.6) | compiles; exit 1 (trait not found) | compiles; exit 1 |
 | `-DONE_LEVEL` | **error**: "function-like macro 'W1_NOT_A_MACRO' is not defined" | **error**: "missing binary operator before token '('" |
+
+### A.6 `MessageView`'s layout at `10e73842`, before D-688-2 (run 2026-11-28; clang 22.1.2 with libstdc++ 15, gcc 13.3.0 with libstdc++ 13; `-std=c++23 -fsyntax-only -I include`)
+
+The TU includes `<fixpp/wire/parser.hpp>` and names `sizeof` of `MessageView<access_mode::Index>` and
+`MessageView<access_mode::Iter>`. On clang, `-Xclang -fdump-record-layouts-complete` prints each
+record. On gcc, `template <unsigned long> struct S; S<sizeof(MessageView<access_mode::Index>)> s;` prints
+the size in its error.
+
+| | release (`-DNDEBUG`) | debug |
+|---|---|---|
+| `sizeof(MessageView<Index>)`, clang and gcc | 352 | 368 |
+| `resolved_application_version_` (1 byte), clang | offset 336 | offset 352 |
+| `dict_owner_` (a pointer), clang | offset 344 | offset 360 |
+| `sizeof(MessageView<Iter>)`, clang | 32 (the three Index-only members empty, at offset 0) | not read |
+
+A `std::uint32_t` declared right after `resolved_application_version_` falls at offset 340 (release)
+or 356 (debug), inside the 7-byte gap. The same dump after D-688-2 must show that offset and the same
+`sizeof`. MSVC was not run here (§1.4a, the layout).
