@@ -1,6 +1,6 @@
 # fixpp#688, #707, #559 site 1 — the wire parser's unknown-field view, the writer's passkey and its scratch resource (lane W1 = B103 + B112)
 
-> **Status: v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10; scoped round 5 re-check pending (2026-11-28). v0.6: R-W1-6 delta, D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
+> **Status: v0.7: scoped Gate A CONVERGED round 5 (P1=0, P2=0; P3s applied) (Codex codex_688_707_559_5…, 2026-11-28). v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10. v0.6: R-W1-6 delta, D-688-2, the first-unknown index (§1.4a), over v0.5. v0.5: the /analyze findings applied (R-W1-5, 2026-11-28) over v0.4. v0.4: Gate A CONVERGED round 3 (2026-11-27): Codex P1/P2/P3 r1 3/7/2, r2 1/2/1, r3 0/2/1; Opus post-judging r1 1/9/7, r2 1/3/6, r3 0/0/9; 2 rewrites + this P3 pass. Owner-delegated sign-off (2026-11-27, parent decisions/speckit/pr-w1-688-707-559-owner-rulings.md).**
 > Issue-mode design note. v0.5 (D-688-1, D-707-1/2, D-559-1) is implemented on the branch; D-688-2 is not yet. Branch
 > `wire-688-707-559-headroom-token`, cut from `origin/main` at `b93b8a28`. What each round changed,
 > and what it declined, is in "Gate A".
@@ -24,7 +24,7 @@
 | Id | Issue | Decision |
 |---|---|---|
 | D-688-1 | #688 | `unknown_fields()` becomes the filtered view `[2b §4.8]` specifies: it walks the offset table and allocates nothing, so there is no exhaustion to report. It yields the tags the dictionary does not define (`table_view::tag_defined`), not the tags the MsgType does not declare (R-W1-3). |
-| D-688-2 | #688 (R-W1-6, v0.6) | `MessageView<Index>` remembers where the first unknown entry is: one `std::uint32_t` index into `entries()`, written by the first `unknown_fields()` call over a non-empty table, in existing padding, so later calls start there. The design requires both modes' `sizeof` and `alignof` to stay those of the tree before D-688-2, read before and after on each toolchain (§1.4a). |
+| D-688-2 | #688 (R-W1-6, v0.6) | `MessageView<Index>` remembers where the first unknown entry is: one `std::uint32_t` index into `entries()`, in existing padding. The first `unknown_fields()` call over a non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans on every call; later calls start at a stored index. The design requires both modes' `sizeof` and `alignof` to stay those of the tree before D-688-2, read before and after on each toolchain (§1.4a). |
 | D-707-1 | #707 | `group_writer_token` gets 104's shape (a user-provided private copy constructor). `Writer::open_group` builds the `group_writer` itself, because `std::in_place` copies the key outside `Writer`. |
 | D-707-2 | #707 | The census the issue asks for finds `dict::detail::snapshot_key` of the same shape, and W1 fixes it (R-W1-2). It gets a user-provided private default constructor and a user-provided **public** copy constructor, because `std::make_shared` copies it. |
 | D-559-1 | #559 site 1 | Delete `Writer::scratch_mr_` and the constructor's `scratch_mr` parameter. The writer keeps no group bookkeeping, so there is nothing to put on it. W1 closes #559; its fourth site is fixpp#735 (R-W1-1). |
@@ -253,8 +253,8 @@ in 093's bundle as history.
 - **`unknown_fields()` keeps `noexcept`, `[[nodiscard]]`, `[[clang::lifetimebound]]` and its
   `requires(Mode == access_mode::Index)`.** It no longer has a `try`, because nothing in it can throw.
   `begin()` and `end()` lose their `[[clang::lifetimebound]]` (the iterator contract above).
-- **Side effect, stated as a property.** ⚠️ *Withdrawn in v0.6 (D-688-2): `unknown_fields()` writes one
-  index, on its first call over a non-empty table; the thread contract is §1.4a's.* The v0.5 text:
+- **Side effect, stated as a property.** ⚠️ *Withdrawn in v0.6 (D-688-2): the first `unknown_fields()` call over a
+  non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans; the thread contract is §1.4a's.* The v0.5 text:
   `unknown_fields()` no longer writes any member, so the
   `mutable` state it shared across `const` calls is gone. Threads calling it on one const view no
   longer write shared state. This note claims nothing wider about sharing a `MessageView` across
@@ -292,7 +292,9 @@ in 093's bundle as history.
   - repeated iteration of one view, and repeated `unknown_fields()` calls, where today's later calls
     are O(1);
   - `unknown_fields().empty()` on a frame with no unknown fields, which today is O(1) after the first
-    call and becomes a whole-table scan.
+    call and becomes a whole-table scan. ⚠️ *D-688-1 history. Under D-688-2 (§1.4a) only the first
+    call scans the whole table and later calls start at the stored end index, so this case measures
+    the removal of the whole-table rescan after the first call.*
 - **How the new cases are timed.** CI cannot time them against the base:
   - `tools/bench_compare.py` compares only the benchmark names both trees have;
   - `[const §VIII.2a]` excludes a candidate-only row from timing for that PR;
@@ -333,7 +335,9 @@ in 093's bundle as history.
 - **What a slowdown needs (R-W1-4 as amended twice).** Nothing is accepted in advance.
   - **The shapes expected to regress:** repeated `unknown_fields()` calls and repeated iteration of
     one view, and `unknown_fields().empty()` on a frame with no unknown fields. The single-pass arm is
-    reported beside them, so the report shows both sides.
+    reported beside them, so the report shows both sides. ⚠️ *D-688-1's list. Under D-688-2 what each
+    case is expected to do is §1.4a's "Expected bench effect"; every row is still measured and
+    judged by the rule below.*
   - **How they are measured:** the transplanted A-B-A-B run above, min per tree, with its command and
     figures in the evidence file.
   - **The rule.** Each row past `[const §VIII.2]`'s band is decided after the measurement, with its
@@ -531,8 +535,7 @@ and the dictionary's answers. Each is fixed after construction:
   `nested_cache_`. So two threads reading one view through `group<>()` already race. The index is
   state of the same kind, under the same contract, and adds no hazard the contract permits.
 - **Against v0.5 and against the base.** D-688-1's "Side effect, stated as a property" (that
-  `unknown_fields()` writes no member) is withdrawn: it writes the index once, on the first call over
-  a non-empty table. Against the base (`b93b8a28`), which wrote `unk_items_` and
+  `unknown_fields()` writes no member) is withdrawn: the first call over a non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans. Against the base (`b93b8a28`), which wrote `unk_items_` and
   `unk_items_built_` on the first call, nothing changes.
 - **One place where the library itself shares a view across threads: `kEmpty`.**
   `owning_message_handle::view()` (`src/dictionary/reify.cpp`) returns one function-local
@@ -612,7 +615,8 @@ here ahead of the after-run.
     `static_assert(` stands alone on its line, which a single-line `git grep` misses.
   - (P3) `git grep -n -E '(offsetof|alignof) ?\([^)]*(MessageView|OffsetTable|unknown_fields_view)' -- …`.
     Known positive: the `alignof(OffsetTable::entry)` pin in `tests/wire/offset_table_test.cpp`.
-  - (P4) `git grep -n kParseContainers -- .`. Known positive: the constant's definition in
+  - (P4) `git grep -n kParseContainers -- . ':!.specify/688-707-559-wire-headroom-token.md'`, §1.5's
+    command. Known positive: the constant's definition in
     `src/session/parse_capacity.hpp`.
   - (P5) holders by value, in three recipes:
     - (P5a) `git grep -n -E '(optional|expected_t|unique_ptr)<\s*(::)?(std::)?(::)?(fixpp::)?(wire::)?MessageView' -- src include tests tools`.
@@ -816,8 +820,8 @@ then keep the hits about `unknown_fields`; `parser.hpp`'s "an Iter view stores n
 - **`include/fixpp/wire/parser.hpp`, the comment above `unknown_fields()`.** "It stores and
   allocates nothing, so no state of the parse resource changes what it yields" becomes: "It allocates
   nothing, so no state of the parse resource changes what it yields. The view stores no list; this
-  MessageView stores one index, where the first unknown entry is, written by the first call over a
-  non-empty table, and later calls start there (D-688-2)." "The view copies its context out of this
+  MessageView stores one index, where the first unknown entry is: the first call over a non-empty
+  table stores the index when it is representable; otherwise it leaves the sentinel and rescans, and later calls start at a stored index (D-688-2)." "The view copies its context out of this
   MessageView, not a pointer to it" stays true.
 - **`include/fixpp/wire/parser.hpp`, the new member's comment.** It states the encoding (the
   sentinel, "none" as the end index), the two `detail` predicates and why each half exists (the
@@ -1471,16 +1475,17 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
   file:
   - "Nothing is stored, so no state of the parse resource changes what it yields" becomes: "It
     allocates nothing, so no state of the parse resource changes what it yields. The view stores no
-    list; the `MessageView` stores one index, where the first unknown entry is, written by the first
-    call over a non-empty table."
+    list; the `MessageView` stores one index, where the first unknown entry is: the first call over a
+    non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans."
   - Its Cost bullet's "a second `unknown_fields()` call classifies again, and `empty()` on a frame
     with no unknown field scans the whole table" becomes: "the first `unknown_fields()` call
-    classifies as far as the first unknown entry and remembers where it is, so a later call makes no
-    classification before it, and `empty()` is O(1) after the first call. Each iteration still
+    classifies as far as the first unknown entry and stores where it is when that index is
+    representable, so a later call makes no classification before it, and `empty()` is O(1) after the
+    first call; an index that is not representable leaves the sentinel, and every call rescans. Each iteration still
     classifies every entry after the first unknown one."
   - It gains a threading sentence: "One `MessageView` is read by one thread at a time (`[2b §6.6]`).
-    The first `unknown_fields()` call writes the index, as `group<>()` writes the view's group
-    context. A null reify handle's shared empty view is never written by `unknown_fields()`."
+    The first `unknown_fields()` call over a non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans; a store is a write, as
+    `group<>()` writes the view's group context. A null reify handle's shared empty view is never written by `unknown_fields()`."
 - **Amended in v0.6 (D-688-2): `B-707-1`.** Its `parser.hpp` bullet gains: "`MessageView<Index>`
   gains `first_unknown_`, an index declared in what was padding before `dict_owner_`;
   `MessageView<Iter>` gains an empty member." The sentence on whether either size changes is written
@@ -1512,7 +1517,7 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
 | public C++ API or C ABI | **yes**, the C++ API only | D-688-1 (`unknown_fields_view`, `MessageView` layout); D-559-1 (`Writer`'s constructor); D-707-1/2 (the keys' copy constructors) |
 | the parser | **yes** | D-688-1 (`MessageView::unknown_fields`); D-688-2 (`MessageView<Index>`'s layout: one member, the first-unknown index) |
 | wire format or codegen layout | no | Bytes on the wire do not change, and the emitted flyweights hold a pointer. D-688-2's layout change is the parser's (row above). |
-| concurrency, session FSM, store, security | **yes**, concurrency | D-688-1 removes a `mutable` write. D-688-2 adds one back: one `mutable` index, written by the first `unknown_fields()` call over a non-empty table. `[2b §6.6]`'s single-thread contract is unchanged. Concurrent `unknown_fields()` on one non-empty view becomes a race, as `group<>()` on one view already is. The only library-shared view (`kEmpty`) has an empty table and is never written by `unknown_fields()` (§1.4a, cell (e)). Neither adds synchronisation. |
+| concurrency, session FSM, store, security | **yes**, concurrency | D-688-1 removes a `mutable` write. D-688-2 adds one back: one `mutable` index; the first `unknown_fields()` call over a non-empty table stores the index when it is representable; otherwise it leaves the sentinel and rescans. `[2b §6.6]`'s single-thread contract is unchanged. Concurrent `unknown_fields()` on one non-empty view becomes a race, as `group<>()` on one view already is. The only library-shared view (`kEmpty`) has an empty table and is never written by `unknown_fields()` (§1.4a, cell (e)). Neither adds synchronisation. |
 | a new `.specify/` design document | **yes** | this note |
 
 **The four Appendix A controls apply, with no reading of `[const §X.6]` needed.**
@@ -1524,7 +1529,8 @@ and W1 does site 1, so **the W1 PR closes #559**, and its body names #735 as the
   - **Codex Gate A, v0.6:** R-W1-6's new member changes the parser's layout, which is Appendix A's
     trigger ("touches the wire format, parser, or codegen layout"). So the D-688-2 delta gets a
     scoped Codex Gate A review before implementation, as the amended clauses of v4.1 to v4.4 did.
-    Round 4 is applied in v0.7; the scoped round 5 re-check is **pending** ("Gate A"). The delta is
+    Round 4 is applied in v0.7, and the scoped round 5 converged (P1=0, P2=0), its three P3s applied
+    in v0.7 ("Gate A"). The delta is
     §1.4a and the lines it flags in §1.4, §1.5, §1.6, §4, §5, §6 and §7.
   - **`/clarify`:** by hand. The rulings record is its record (R-W1-1 to R-W1-4).
   - **`/analyze`:** by the spec-analyzer over the converged v0.4 note, after Gate A and before
@@ -1716,7 +1722,9 @@ alternative (§1.4).
 
 ## Gate A
 
-- v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10; scoped round 5 re-check pending. Codex P1=1 P2=2 P3=3 (2026-11-28). Scoped to the D-688-2 delta; the converged rounds below are not reopened. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_4_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_4_wire_headroom_token_triage.md` (paths from the parent repository's root). What each finding changed, and what was declined, is under "Round 4" below.
+- v0.7: scoped Gate A CONVERGED round 5 (P1=0, P2=0; P3s applied) (2026-11-28): Codex P1=0 P2=0 P3=3, scoped to the D-688-2 delta; each P3's mechanical edit is applied, with no rewrite. Review: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_5_wire_headroom_token_review.md` (path from the parent repository's root). What each finding changed is under "Round 5" below.
+
+- v0.7: scoped round 4 (Codex codex_688_707_559_4…, Opus opus_688_707_559_4…) applied — post-judging P1=0 P2=2 P3=10; round 5 above re-checked it. Codex P1=1 P2=2 P3=3 (2026-11-28). Scoped to the D-688-2 delta; the converged rounds below are not reopened. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_4_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_4_wire_headroom_token_triage.md` (paths from the parent repository's root). What each finding changed, and what was declined, is under "Round 4" below.
 
 - v0.6: R-W1-6 delta (2026-11-28). The delta is D-688-2 (§1.4a) and the lines it flags in §1.4,
   §1.5, §1.6, §4, §5, §6 and §7, with §A.6. Its scoped Codex Gate A review is round 4 (v0.7).
@@ -1726,6 +1734,14 @@ alternative (§1.4).
 - Round 2 applied 2026-11-27: Codex P1=1 P2=2 P3=1; Opus post-judging P1=1 P2=3 P3=6; rewrite addresses root causes #1 (an acceptance written ahead of its measurement and outside the PR thread), #2 (the by-value iterator is a public contract change whose attributes, witness and disclosure were not derived from the type), #3 (instruments not shown to be able to report non-zero). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md` (paths from the parent repository's root).
 
 - Round 3 — converged 2026-11-27: Codex P1=0 P2=2 P3=1; Opus post-judging P1=0 P2=0 P3=9; no rewrite: a P3 pass applies each finding's mechanical edit (v0.4). Root cause #1: the supersession sweep was keyed on the decisions' topics, not on the declarations they change. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_1_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_1_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_2_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_2_wire_headroom_token_triage.md`, `research/G19-fix-fpml-iso20022/research/reviews/codex_688_707_559_3_wire_headroom_token_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_688_707_559_3_wire_headroom_token_triage.md` (paths from the parent repository's root).
+
+### Round 5 (scoped to D-688-2) — how each finding was applied
+
+| Finding | Where v0.7 answers it |
+|---|---|
+| Codex F-1 (P3) | Every claim that the first call over a non-empty table writes the index now says it stores the index when it is representable, and otherwise leaves the sentinel and rescans: the Decisions row, §1.4's withdrawn side-effect bullet, §1.4a's thread contract and the proposed `unknown_fields()` comment, §4's `B-688-1` amendment (its text, Cost and threading sentences), §5's concurrency row |
+| Codex F-2 (P3) | §1.4's bench-case list: the `empty()` case's "becomes a whole-table scan" is marked D-688-1 history, and the case measures the removal of the rescan after the first call; the "shapes expected to regress" list points at §1.4a's "Expected bench effect" |
+| Codex F-3 (P3) | §1.4a's P4 is §1.5's command, with the pathspec that excludes this note |
 
 ### Round 4 (scoped to D-688-2) — how each finding was applied
 
