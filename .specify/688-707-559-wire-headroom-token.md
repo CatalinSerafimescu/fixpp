@@ -431,8 +431,9 @@ three §1.4 statements this one changes are flagged there.
       mutants). They do not see the call sites; a read that tests only the `!=` half at the call
       site is cell (b)'s M4.
     - *(Amended at Gate B round 1, F-3.)* The store's refusal is run by cell (f): a store helper
-      that skips `first_unknown_fits`, or bounds it some other way, fails there, and a call site that
-      skips the helper fails cell (a). **What has no cell:** a call site that bypasses the helper with
+      with its `if` removed, bounded by `<=` against the sentinel instead of `first_unknown_fits`,
+      or checking the index after a cast to `std::uint32_t`, fails there (an equivalent correct bound
+      passes, as it should), and a call site that skips the helper fails cell (a). **What has no cell:** a call site that bypasses the helper with
       a raw cast-store (`first_unknown_ = static_cast<std::uint32_t>(idx)`) behaves identically below
       2^32 entries, so no cell can fail on it. That is an accepted mutation gap, not a coverage gap:
       the helper's branch is executed both ways.
