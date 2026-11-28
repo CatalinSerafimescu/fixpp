@@ -8,7 +8,7 @@
 // reports nothing. Mutation: the first-unknown index written over an empty table, which TSan
 // reports as a race on the index; on a lane without TSan the cell passes either way.
 //
-// Its own process, with this one cell and nothing else: the index is written at most once, so the
+// Keep this binary to its one cell, in its own process: the index is written at most once, so the
 // process's first unknown_fields() call on the shared view must be made inside the two threads. A
 // call made first on the main thread would happen-before both threads and hide the race.
 //
