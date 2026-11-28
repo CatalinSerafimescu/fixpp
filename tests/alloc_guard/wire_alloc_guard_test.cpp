@@ -104,7 +104,7 @@ TEST(WireAllocGuard, ParseSerializeLoopNoHeapAlloc) {
 
         // W1 (`.specify/688-707-559-wire-headroom-token.md` §1.6 item 4): the unknown-field view
         // and its iteration, inside the window. The parser is dict-free, so every non-framing
-        // field is unknown: the twelve body fields above, 5000 among them.
+        // field of the frame above is unknown, 5000 among them.
         std::size_t unknown = 0;
         for (auto const& kv : mv->unknown_fields()) {
             (void)kv;

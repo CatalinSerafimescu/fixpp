@@ -2819,18 +2819,18 @@ TEST(InboundFrameDispositionsQ6, Control_FrameOfExactlyLIsDelivered) {
 
 // ── Q-33 (T060): lazy reads at headroom exhaustion inside a callback ────────
 //
-// A FIX 4.4 NewOrderSingle of exactly L = 65536 bytes: three fields whose tags FIX44.xml does
+// A FIX 4.4 NewOrderSingle of exactly L = 65536 bytes: the fields whose tags FIX44.xml does
 // not define (kQ33UnknownTags; re-check with `grep -c "number='5000'" dictionaries/FIX44.xml`,
 // which must print 0), a NoPartyIDs(453) group whose slices outgrow the callback headroom, then
 // "2=<SOH>" fields to fill the frame and the overlay. Tag 2 (AdvId) is defined by FIX44.xml, so
 // since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, ruling R-W1-3) the fillers are
-// not unknown fields: only the three undefined tags are. Inside fromApp the callback reads
+// not unknown fields: only kQ33UnknownTags are. Inside fromApp the callback reads
 // group_slices(453), then unknown_fields(). The assertions branch at runtime on the library's own
 // condition, the parse arena's upstream (fixpp::detail::arena_upstream()); no arm is skipped:
 //   - null upstream: group_slices() reports its exhaustion (an empty span);
 //   - forwarding upstream (MSVC debug): group_slices() succeeds and the spill is recorded.
-// unknown_fields() allocates nothing, so on both lanes it yields exactly the three undefined
-// tags, in document order.
+// unknown_fields() allocates nothing, so on both lanes it yields exactly kQ33UnknownTags, in
+// document order.
 // Either way the session stays Active and processes the next frame. The C arms are
 // T091's (Phase 8).
 //

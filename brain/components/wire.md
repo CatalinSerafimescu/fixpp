@@ -491,10 +491,16 @@ decisions, each with what it rejected:
     attribute would reject the valid idiom. `include/fixpp/wire/unknown_fields.hpp` is current.
   - `specs/004-wire-codec`'s writer-scratch records: contracts `writer.hpp` (the `scratch_mr`
     constructor), the data-model's `Writer::scratch_mr` and its arena rows, the plan's three-arena
-    lines, research D-3, the tasks, and checklist `nfr.md` CHK003's writer-scratch arena. Since
+    lines, research D-3, the tasks, and checklist `nfr.md` CHK001's three-arena model and CHK003's
+    writer-scratch arena. Since
     D-559-1 the writer takes no scratch resource and allocates nothing; `include/fixpp/wire/writer.hpp`
     and `.specify/2b-wire.md` §4.5, §6.6, §8 and seam 13 (amended in place) are current.
-  - 093's plan OD-18, as the record of the catch D-688-1 replaces.
+  - 093's plan OD-18, as the record of the catch D-688-1 replaces, and 093's other records of the
+    empty view on exhaustion: spec FR-015, quickstart Q-32 and Q-33, research R-10, tasks, and
+    checklist `abi.md` CHK030; 100's plan, which cites that empty view as L-093-5's last bullet; and
+    `.specify/495-493-486-dict-reify-copy.md`'s mention of `unk_items_` among the parse containers.
+    Re-derive with `git grep -n -E 'empty view|unk_items_' -- specs/093-inbound-frame-dispositions
+    specs/100-wire-group-read-integrity .specify/495-493-486-dict-reify-copy.md`.
   - 093's records of the value `kParseContainers` (plan, research, data-model, tasks, checklist
     `nfr.md`): the count they quote included `MessageView`'s deleted `unk_items_`;
     `src/session/parse_capacity.hpp`, re-derived by its recipe, is current.
