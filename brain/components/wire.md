@@ -90,7 +90,7 @@ correctly on the first hop:
 | **Flyweight + caller-owned buffer** — views never own bytes; lifetime is the buffer's | owning views. Enforcement is *layered*, `[[clang::lifetimebound]]` being one layer, not the whole answer |
 | **Hybrid offset table** — eager through the typed dictionary surface, lazy on the raw iterator | picking one. The access *intent* differs: random-access wants the index built, streaming does not |
 | **Typed `group_view<T>` default, `.iter()` opt-out** | forcing group-index construction on streaming callers |
-| **Opaque round-trip for custom fields**, `unknown_fields()` as a filtered view ⚠️ built as specified only since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1): until then the parser materialised the list in the parse resource, and it classified by `field_valid_for`; as built the predicate is `table_view::tag_defined` (ruling R-W1-3) | materialising a vector — which would allocate, violating `[const §VIII.5]` |
+| **Opaque round-trip for custom fields**, `unknown_fields()` as a filtered view ⚠️ built as specified only since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1): until then the parser materialised the list in the parse resource, and it classified by `field_valid_for`; as built the predicate is `table_view::tag_defined` (ruling R-W1-3), and the `MessageView` keeps one index, where the first unknown entry is (D-688-2) | materialising a vector — which would allocate, violating `[const §VIII.5]` |
 | **`BodyLength` + `CheckSum` verified BEFORE the parser sees a frame** | parsing first and validating after. A frame that fails the envelope check never reaches the parser at all |
 
 ## Repeating groups need a dictionary — and that is a hard boundary, not a soft one

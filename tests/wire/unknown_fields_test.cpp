@@ -5,7 +5,7 @@
 //
 // W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, ruling R-W1-3): the view is the
 // filtered view of [2b §4.8]. It walks the offset table's entries, classifying each against the
-// dictionary the Parser was built with (table_view::tag_defined), and stores nothing, so the
+// dictionary the Parser was built with (table_view::tag_defined), and allocates nothing, so the
 // parse resource's state cannot change what it yields. A hand-built table defines every tag it
 // was told anything about (table_view::mark_defined's comment), so in the cells below 35 and 34
 // are defined and the 5000s are not. The real-dictionary cells are in unknown_fields_dict_test.cpp.
@@ -14,8 +14,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -25,6 +27,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/unknown_fields.hpp>
 
+#include "support/dict_hooks_test_access.hpp"
 #include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -303,13 +306,192 @@ TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
     EXPECT_FALSE(has_framing) << "framing tags 8/9/10 must never appear as unknown";
 }
 
+// ── D-688-2 (W1, R-W1-6): the first-unknown index ─────────────────────────────────────────
+//
+// The MessageView remembers where its first unknown entry is
+// (`.specify/688-707-559-wire-headroom-token.md` §1.4a). These cells build the view with the
+// three-argument constructor over a bundle whose classify stub counts its calls through the opaque
+// dictionary it is given; the group hooks are null, which these frames do not need.
+
+namespace first_unknown {
+
+// The stub's dictionary: a call counter, and which tags it defines.
+struct counting_dict {
+    mutable std::size_t calls = 0;
+    bool defines_every_tag = false;  // else it defines the tags below 5000
+};
+
+bool counting_classify(void const* dict, std::string_view /*msg_type*/,
+                       std::uint16_t tag) noexcept {
+    auto const* const d = static_cast<counting_dict const*>(dict);
+    ++d->calls;
+    return d->defines_every_tag || tag < 5000;
+}
+
+fixpp::wire::dict_hooks counting_hooks(counting_dict const& d) {
+    return fixpp::wire::dict_hooks_test_access::make(&d, &counting_classify, nullptr, nullptr,
+                                                     nullptr, nullptr);
+}
+
+bool is_framing(std::uint16_t tag) { return tag == 8 || tag == 9 || tag == 10; }
+
+}  // namespace first_unknown
+
+// (a) After the first call, a later call makes no classify call before the first unknown entry,
+// and an iteration classifies only the entries after it.
+TEST(WireUnknownFieldsFirstUnknownIndex, LaterCallMakesNoClassifyCallBeforeTheFirstUnknownEntry) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "55=X\x01"
+        "5000=a\x01"
+        "5001=b\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    first_unknown::counting_dict const dict{};
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::MessageView<access_mode::Index> const mv{*fv, &arena,
+                                                          first_unknown::counting_hooks(dict)};
+
+    // The expected counts, from the table: the non-framing entries up to and including the first
+    // undefined one, and the non-framing entries after it.
+    std::size_t through_first_unknown = 0;
+    std::size_t after_first_unknown = 0;
+    std::size_t defined_before = 0;
+    bool seen_unknown = false;
+    for (auto const& e : mv.offsets().entries()) {
+        if (first_unknown::is_framing(e.tag)) continue;
+        if (seen_unknown) {
+            ++after_first_unknown;
+            continue;
+        }
+        ++through_first_unknown;
+        if (e.tag >= 5000) {
+            seen_unknown = true;
+        } else {
+            ++defined_before;
+        }
+    }
+    ASSERT_TRUE(seen_unknown);
+    ASSERT_GE(defined_before, 2U)
+        << "the frame needs two defined tags before its first unknown one";
+    ASSERT_GE(after_first_unknown, 1U);
+
+    dict.calls = 0;
+    auto const first = mv.unknown_fields();
+    EXPECT_FALSE(first.empty());
+    EXPECT_EQ(dict.calls, through_first_unknown)
+        << "the first call scans to the first unknown entry";
+
+    dict.calls = 0;
+    auto const later = mv.unknown_fields();
+    EXPECT_FALSE(later.empty());
+    EXPECT_FALSE(later.begin() == later.end());
+    EXPECT_EQ(dict.calls, 0U) << "a later call classified entries before the first unknown one";
+
+    dict.calls = 0;
+    std::vector<std::pair<std::uint16_t, std::string>> got;
+    for (auto const& kv : later) {
+        got.emplace_back(kv.tag, std::string{reinterpret_cast<char const*>(kv.data), kv.len});
+    }
+    std::vector<std::pair<std::uint16_t, std::string>> const expected{{5000, "a"}, {5001, "b"}};
+    EXPECT_EQ(got, expected);
+    EXPECT_EQ(dict.calls, after_first_unknown)
+        << "an iteration classifies exactly the entries after the first unknown one";
+}
+
+// (c) A frame with no unknown field: the first call classifies every non-framing entry, and a
+// later call classifies nothing.
+TEST(WireUnknownFieldsFirstUnknownIndex, FrameWithNoUnknownFieldIsClassifiedOnce) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "55=X\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    first_unknown::counting_dict const dict{.calls = 0, .defines_every_tag = true};
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::MessageView<access_mode::Index> const mv{*fv, &arena,
+                                                          first_unknown::counting_hooks(dict)};
+
+    std::size_t non_framing = 0;
+    for (auto const& e : mv.offsets().entries()) {
+        if (!first_unknown::is_framing(e.tag)) ++non_framing;
+    }
+    ASSERT_GE(non_framing, 3U);
+
+    dict.calls = 0;
+    EXPECT_TRUE(mv.unknown_fields().empty());
+    EXPECT_EQ(dict.calls, non_framing) << "the first call classifies every non-framing entry";
+
+    for (int call = 0; call < 3; ++call) {
+        dict.calls = 0;
+        auto const uf = mv.unknown_fields();
+        EXPECT_TRUE(uf.empty()) << "call " << call;
+        EXPECT_TRUE(uf.begin() == uf.end()) << "call " << call;
+        EXPECT_EQ(dict.calls, 0U) << "call " << call << " classified again";
+    }
+}
+
+// (b) Moves; there are no copies (the copy pins are in parser_index_test.cpp). The source is moved
+// from with its index set, and with it unset. The destination owns the buffer and yields the
+// source's list, also after the source is destroyed. The moved-from source, read while the
+// destination lives, yields nothing; the oracle is the death-test child's exit code, so a crash
+// or a non-empty view stays inside this cell.
+void moved_from_arm(bool set_index_before_the_move) {
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "34=1\x01"
+        "5000=a\x01"
+        "55=X\x01"
+        "5001=b\x01");
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    fixpp::dict::table_view const dict = known_35_34_55();
+    std::pmr::monotonic_buffer_resource arena;
+    Parser<access_mode::Index> parser{dict};
+    std::optional<fixpp::core::expected_t<fixpp::wire::MessageView<access_mode::Index>>> src{
+        parser.parse(*fv, &arena)};
+    ASSERT_TRUE(src->has_value());
+
+    std::vector<std::pair<std::uint16_t, std::string>> const expected{{5000, "a"}, {5001, "b"}};
+    if (set_index_before_the_move) {
+        ASSERT_EQ(yielded(**src), expected);
+    }
+
+    fixpp::wire::MessageView<access_mode::Index> b{std::move(**src)};
+
+    // M4 shows only over an empty moved-from table, so a standard library that kept the
+    // elements reports here instead of leaving M4 untested.
+    ASSERT_TRUE((**src).offsets().entries().empty())
+        << "precondition: the moved-from source's table is empty";
+    EXPECT_EXIT(
+        {
+            auto const uf = (**src).unknown_fields();
+            std::_Exit(uf.empty() && uf.begin() == uf.end() ? 0 : 1);
+        },
+        ::testing::ExitedWithCode(0), "");
+
+    EXPECT_EQ(yielded(b), expected) << "the destination, while the source lives";
+    src.reset();
+    EXPECT_EQ(yielded(b), expected) << "the destination, after the source is destroyed";
+}
+
+TEST(WireUnknownFieldsFirstUnknownIndexDeathTest, MovedFromSourceWithTheIndexSetYieldsNothing) {
+    moved_from_arm(/*set_index_before_the_move=*/true);
+}
+
+TEST(WireUnknownFieldsFirstUnknownIndexDeathTest, MovedFromSourceWithTheIndexUnsetYieldsNothing) {
+    moved_from_arm(/*set_index_before_the_move=*/false);
+}
+
 // ── Q-32 (093-inbound-frame-dispositions, FR-015, fixpp#540; W1 D-688-1, fixpp#688) ─────────
 //
 // The parse resource here is a monotonic buffer over a heap block, its upstream set explicitly to
 // null (through a tracking resource), so the result does not depend on the lane's
 // arena_upstream(). The block is the smallest that lets the parse succeed with no upstream
 // request, found by a sweep, so a list materialised in the parse resource would not fit in it.
-// unknown_fields() stores nothing, so over that block it still yields every unknown field and
+// unknown_fields() allocates nothing, so over that block it still yields every unknown field and
 // makes no upstream request.
 
 namespace q32 {
@@ -391,13 +573,17 @@ TEST(WireUnknownFieldsQ32, ExhaustedArenaStillYieldsEveryUnknownFieldWithNoUpstr
     ASSERT_TRUE(p.mv.has_value());
     ASSERT_EQ(p.upstream.allocate_calls(), 0U) << "the parse itself fits in the block";
 
-    std::size_t n = 0;
-    for (auto const& kv : p.mv->unknown_fields()) {
-        (void)kv;
-        ++n;
+    // Two calls, each iterated: the second starts at the stored index (D-688-2).
+    for (int call = 0; call < 2; ++call) {
+        std::size_t n = 0;
+        for (auto const& kv : p.mv->unknown_fields()) {
+            (void)kv;
+            ++n;
+        }
+        // 35, 34 and the 5000s: a dict-free view classifies every non-framing tag unknown.
+        EXPECT_EQ(n, q32::kUnknownFields + 2U)
+            << "call " << call << ": the exhausted block emptied the view";
     }
-    // 35, 34 and the 5000s: a dict-free view classifies every non-framing tag unknown.
-    EXPECT_EQ(n, q32::kUnknownFields + 2U) << "the exhausted block emptied the view";
     EXPECT_EQ(p.upstream.allocate_calls(), 0U) << "unknown_fields() made an upstream request";
 }
 

@@ -10,9 +10,10 @@
 //
 // ⚠️ As built since W1 (`.specify/688-707-559-wire-headroom-token.md` D-688-1, fixpp#688):
 // the view is the filtered view [2b §4.8] specifies, replacing a list the MessageView
-// materialised in its parse resource. It stores nothing: it holds the remaining offset-table
+// materialised in its parse resource. The view stores no list: it holds the remaining offset-table
 // entries, the frame's base, the dictionary's classify hook and the MsgType, and classifies as
-// it goes, so no resource state can change what it yields. "Unknown" is a tag the dictionary
+// it goes, so no resource state can change what it yields. The MessageView that builds it keeps
+// one index, where the first unknown entry is (D-688-2). "Unknown" is a tag the dictionary
 // does not define (classify_fn() answers table_view::tag_defined, ruling R-W1-3); framing tags
 // 8, 9 and 10 are never unknown; a dict-free view (no classify hook) yields every other tag.
 //
@@ -143,8 +144,9 @@ private:
     template <access_mode>
     friend class MessageView;
 
-    // Built by MessageView<Index>::unknown_fields() alone. The first unknown entry is found here,
-    // so begin() and empty() are O(1); View's base is that entry's value bytes, or none.
+    // Built by MessageView<Index>::unknown_fields() alone. The first unknown entry is found before
+    // construction, by scan() on a MessageView's first call or from its stored index on a later
+    // one, so begin() and empty() are O(1); View's base is that entry's value bytes, or none.
     unknown_fields_view(scan_state const& s, entry const* first,
                         detail::generation_token gen) noexcept
         : View{first == s.end ? nullptr : s.base + first->offset,

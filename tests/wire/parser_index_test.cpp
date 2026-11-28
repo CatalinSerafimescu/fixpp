@@ -40,6 +40,13 @@ static_assert(!std::is_move_assignable_v<MessageView<access_mode::Index>>,
               "MessageView<Index> move-assignment must stay deleted (pmr allocator does not "
               "propagate on move-assign -> reopens the nested-read arena leak)");
 
+// W1 D-688-2 (`.specify/688-707-559-wire-headroom-token.md` §1.4a, cell (b)): the first-unknown
+// index relies on there being no copied MessageView, so a copy never carries an index into
+// another table. RED: a user-provided copy constructor or copy assignment on MessageView.
+static_assert(!std::is_copy_constructible_v<MessageView<access_mode::Index>> &&
+                  !std::is_copy_assignable_v<MessageView<access_mode::Index>>,
+              "MessageView<Index> copies must stay deleted (the first-unknown index, D-688-2)");
+
 // Build a raw FIX 4.4 frame with correct 9=BodyLength and 10=CheckSum so
 // the factory's boundary computation succeeds.
 std::vector<std::byte> make_frame(std::string_view body_after_bodylen) {

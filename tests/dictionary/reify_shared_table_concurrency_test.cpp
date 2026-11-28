@@ -90,7 +90,8 @@ TEST(ReifySharedTableConcurrency, TwoThreadsReadOneSharedTable) {
             }
             // The view caches its group slices after the first call, and since W1
             // (`.specify/688-707-559-wire-headroom-token.md` D-688-1) its unknown fields
-            // classify on every iteration; every iteration also calls the shared table's
+            // classify on every iteration, and the view remembers where the first one is (D-688-2);
+            // every iteration also calls the shared table's
             // callbacks directly: classification, group membership and the delimiter.
             auto const& hooks = h.view().hooks();
             if (!hooks.classify_fn()(hooks.opaque_dict(), "8", kNoLegs)) {

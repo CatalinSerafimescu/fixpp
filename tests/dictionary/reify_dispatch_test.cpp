@@ -46,6 +46,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
@@ -1209,6 +1210,40 @@ TEST(ReifySharesOwnedTable, HandleAndItsReifyShareTheOwnersTable) {
     ASSERT_TRUE(h2.has_value());
     EXPECT_EQ(h2->view().hooks().opaque_dict(), sp.get())
         << "a handle's own view is owned-route: re-reifying it shares too";
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// W1 D-688-2 (`.specify/688-707-559-wire-headroom-token.md` §1.4a, cell (b)): reify re-parses the
+// source, so a source whose first-unknown index is set gives a handle whose view yields the same
+// unknown fields after the source's frame and arena are gone. A regression cell, not RED-first:
+// it fails only if a later change reused the source's storage (ASan).
+// ═════════════════════════════════════════════════════════════════════════════
+TEST(ReifyFirstUnknownIndex, HandleOfASourceWithTheIndexSetYieldsTheSameUnknownFields) {
+    using fields = std::vector<std::pair<std::uint16_t, std::string>>;
+    auto const yielded = [](MV const& v) {
+        fields out;
+        for (auto const& kv : v.unknown_fields()) {
+            out.emplace_back(kv.tag, std::string{reinterpret_cast<char const*>(kv.data), kv.len});
+        }
+        return out;
+    };
+    fields const expected{{5000, "a"}, {5001, "b"}};
+
+    std::pmr::monotonic_buffer_resource mr;
+    std::optional<fixpp::test_support::copy_site_source> src;
+    src.emplace(
+        fixpp::test_support::assemble_frame(
+            "8=FIX.4.4\x01", std::string("35=D\x01") + "34=1\x01" + "49=S\x01" + "56=T\x01" +
+                                 "11=ORD1\x01" + "5000=a\x01" + "55=AAPL\x01" + "5001=b\x01"),
+        fixpp::wire::OffsetTable::Config{}, /*dict_backed=*/true);
+    ASSERT_TRUE(src->ok());
+    ASSERT_EQ(yielded(src->view()), expected) << "precondition: the source's index is set";
+    auto h = fixpp::dict::reify(src->view(), kProfileV44, &mr);
+    ASSERT_TRUE(h.has_value());
+    src.reset();  // the source's frame, arena and view are destroyed
+
+    EXPECT_EQ(yielded(h->view()), expected);
+    EXPECT_EQ(yielded(h->view()), expected) << "a second call, from the handle's own index";
 }
 
 }  // namespace
