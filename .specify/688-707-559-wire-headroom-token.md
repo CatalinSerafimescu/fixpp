@@ -407,9 +407,14 @@ three §1.4 statements this one changes are flagged there.
   - **Store:** `detail::first_unknown_fits(std::size_t idx)` is `idx < kFirstUnknownNotComputed`. A
     found index that does not fit is not stored. The sentinel stays, and that view rescans on every
     call, which is D-688-1's behaviour, so what it yields is still right.
+    - *(Amended at Gate B round 1, F-3.)* The store itself is the `constexpr` helper
+      `detail::remember_first_unknown(std::uint32_t& slot, std::size_t idx)`: it writes
+      `static_cast<std::uint32_t>(idx)` into `slot` if `first_unknown_fits(idx)`, and otherwise
+      leaves `slot` as it is. `unknown_fields()` stores through it, so the refusal runs in a cell
+      (f, below) on an index past the slot's range, with no table that large.
   - **Where they live:** both are `constexpr` free functions in `fixpp::wire::detail` in
-    `include/fixpp/wire/parser.hpp`, beside `kFirstUnknownNotComputed`, with `static_assert`
-    witnesses next to them:
+    `include/fixpp/wire/parser.hpp`, beside `kFirstUnknownNotComputed` (and, since Gate B round 1,
+    `remember_first_unknown` after them), with `static_assert` witnesses next to them:
     - `!first_unknown_is_set(kFirstUnknownNotComputed, std::size_t{kFirstUnknownNotComputed} + 1U)`:
       the sentinel is not "computed" on a table one entry larger than it. Where `std::size_t` is
       64-bit, it fails the build if the `!=` half is dropped. Where it is 32-bit, the sum wraps to 0
@@ -420,15 +425,22 @@ three §1.4 statements this one changes are flagged there.
     - `first_unknown_is_set(3, 3)` and `!first_unknown_is_set(4, 3)`.
   - **What the witnesses kill, and what has no cell.**
     - CI cannot build a table of 2^32 entries: a direct `Parser` would need `max_offset_entries`
-      raised far past its default and a frame of several GiB. So the runtime path past 2^32 entries
-      has no executable cell.
+      raised far past its default and a frame of several GiB. So the runtime path of a whole
+      `unknown_fields()` call past 2^32 entries has no executable cell.
     - The `static_assert`s kill a mutation of either predicate at compile time (§A.7 runs both
-      mutants). They do not see the call sites. A store that skips `first_unknown_fits` behaves
-      identically below 2^32 entries, so no cell can fail on it; a read that tests only the `!=`
-      half at the call site is cell (b)'s M4.
+      mutants). They do not see the call sites; a read that tests only the `!=` half at the call
+      site is cell (b)'s M4.
+    - *(Amended at Gate B round 1, F-3.)* The store's refusal is run by cell (f): a store helper
+      that skips `first_unknown_fits`, or bounds it some other way, fails there, and a call site that
+      skips the helper fails cell (a). **What has no cell:** a call site that bypasses the helper with
+      a raw cast-store (`first_unknown_ = static_cast<std::uint32_t>(idx)`) behaves identically below
+      2^32 entries, so no cell can fail on it. That is an accepted mutation gap, not a coverage gap:
+      the helper's branch is executed both ways.
     - The call sites are re-derived with
-      `git grep -n -E 'first_unknown_(is_set|fits)\(' -- include/fixpp/wire/parser.hpp`, which must
-      print the two definitions, their witnesses, and one call of each in `unknown_fields()`.
+      `git grep -n -E '(first_unknown_(is_set|fits)|remember_first_unknown)\(' -- include/fixpp/wire/parser.hpp`,
+      which must print the three definitions, the predicates' witnesses, the helper's comment, the one
+      `first_unknown_fits` call inside `remember_first_unknown`, and in `unknown_fields()` one call of
+      `first_unknown_is_set` and one of `remember_first_unknown`.
 - **`unknown_fields()`, in order** (the order matters: step 2 comes before step 3, so a moved-from
   source reads its stale index through the guard, and test (b)'s mutants can show):
   1. `check_alive()`, as now, before anything is read.
@@ -437,11 +449,15 @@ three §1.4 statements this one changes are flagged there.
      (`unknown_fields_view(scan_state, entry const* first, generation_token)`; `MessageView` is its
      friend) at `ents.data() + first_unknown_`. No classify call is made. Re-entering `scan` at that
      index would classify the cached entry once more, and test (a) below pins that it does not.
-  3. Otherwise, if `ents` is empty, return the view of an empty range and write nothing (the shared
-     empty view, under the thread contract below). The scan there is O(1) anyway. A default-constructed
-     view holds the sentinel, so it reaches this step and is only ever read.
-  4. Otherwise run `scan` from `ents.data()` as today. Store the found entry's index `idx` if
-     `detail::first_unknown_fits(idx)`, and otherwise leave the sentinel. Return that view.
+  3. Otherwise, if `ents` is empty, the result is the view of an empty range and nothing is written
+     (the shared empty view, under the thread contract below). A default-constructed view holds the
+     sentinel, so it reaches this step and is only ever read. *(Amended at Gate B round 1, F-1: as
+     built, this rule has no return of its own.)* It is realised by step 4's `scan` over the empty
+     range, which is O(1), makes no classify call and returns the view whose first entry is its end,
+     together with the `!ents.empty()` guard on the store. Step 2 still comes before it.
+  4. Run `scan` from `ents.data()` as today. If `ents` is not empty, store the found entry's index
+     through `detail::remember_first_unknown(first_unknown_, idx)`, which writes it if
+     `detail::first_unknown_fits(idx)` and otherwise leaves the sentinel. Return that view.
 - **Representation: an index, not an `entry const*`. The ruling's premise does not hold in source.**
   - R-W1-6 says "a copied MessageView copies its OffsetTable". Read at `10e73842`: `MessageView`'s
     copy constructor and copy assignment are `= delete`, and so is its move assignment; only its
@@ -812,6 +828,16 @@ bundle from `tests/support/dict_hooks_test_access.hpp`'s `make`:
   - M8, the index written over an empty table: one thread's first-call write, raced by the other
     thread's first call, which TSan reports on `first_unknown_`. That is RED on the TSan lane only;
     on other lanes the cell is green either way, and that is stated with it.
+- **(f) The store's refusal** *(added at Gate B round 1, F-3)*.
+  `WireUnknownFieldsFirstUnknownIndex.StoreWritesOnlyAnIndexThatFits`, in
+  `tests/wire/unknown_fields_test.cpp`, calls `detail::remember_first_unknown` on a slot seeded to a
+  value no case stores, with each index read through a `volatile` so the branch runs at run time:
+  - the sentinel, `2^32` and `2^32 + 5` leave the slot at its seed (the last two only where
+    `std::size_t` is wider than 32 bits; a cast would wrap them to 0 and 5);
+  - `kFirstUnknownNotComputed - 1` and `0` are stored.
+  - Mutants: the helper's `if` removed, the helper bounded by `<=` instead of `first_unknown_fits`,
+    and the check made on the index cast to `std::uint32_t`: each RED in this cell. The helper call
+    deleted at the call site: RED in (a) and (c).
 
 **Comments that change** (re-derive with
 `git grep -n -i -E 'stores? (and allocates )?nothing|nothing is stored|writes no member' -- include/fixpp/wire tests/wire tests/dictionary spec/behaviors-and-limitations.md .specify/2b-wire.md brain/components/wire.md`,
@@ -825,7 +851,7 @@ then keep the hits about `unknown_fields`; `parser.hpp`'s "an Iter view stores n
   MessageView, not a pointer to it" stays true.
 - **`include/fixpp/wire/parser.hpp`, the new member's comment.** It states the encoding (the
   sentinel, "none" as the end index), the two `detail` predicates and why each half exists (the
-  moved-from source, the store bound), why the guard is tested before the empty-table rule, the rule
+  moved-from source, the store bound), the store helper that applies the bound, why the guard is tested before the empty-table rule, the rule
   that nothing is written over an empty table (the shared `kEmpty`), and the thread contract
   (`[2b §6.6]`: one view, one thread at a time).
   - **The placement, as a condition and a recipe only:** "declared right after

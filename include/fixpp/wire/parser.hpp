@@ -120,6 +120,15 @@ static_assert(first_unknown_fits(kFirstUnknownNotComputed - 1U));
 static_assert(first_unknown_is_set(3, 3));
 static_assert(!first_unknown_is_set(4, 3));
 
+// The store: writes idx into slot when first_unknown_fits(idx), and otherwise leaves slot as it
+// is. unknown_fields() stores its found index through this, so the refusal can be run on an index
+// past the slot's range without building a table that large.
+constexpr void remember_first_unknown(std::uint32_t& slot, std::size_t idx) noexcept {
+    if (first_unknown_fits(idx)) {
+        slot = static_cast<std::uint32_t>(idx);
+    }
+}
+
 }  // namespace detail
 
 template <access_mode Mode>
@@ -436,10 +445,8 @@ public:
             auto const v = unknown_fields_view::scan(begin, end, data_ptr(), hooks().classify_fn(),
                                                      hooks().opaque_dict(), msg_type(), token());
             if (!ents.empty()) {  // nothing is written over an empty table
-                auto const idx = static_cast<std::size_t>(v.first_ - begin);
-                if (detail::first_unknown_fits(idx)) {
-                    first_unknown_ = static_cast<std::uint32_t>(idx);
-                }
+                detail::remember_first_unknown(first_unknown_,
+                                               static_cast<std::size_t>(v.first_ - begin));
             }
             return v;
         }
@@ -592,8 +599,9 @@ private:
     //   - The encoding is detail::kFirstUnknownNotComputed ("not computed yet") or a computed
     //     index, "none" being the end index. detail::first_unknown_is_set reads it: its != half
     //     keeps the sentinel from reading as an index, its <= size half makes a moved-from view
-    //     (which keeps the index but not the entries) rescan. detail::first_unknown_fits bounds
-    //     the store: an index that is not representable is not stored, and that view rescans.
+    //     (which keeps the index but not the entries) rescan. detail::remember_first_unknown
+    //     stores it, bounded by detail::first_unknown_fits: an index that is not representable
+    //     is not stored, and that view rescans.
     //   - unknown_fields() tests the guard before its empty-table rule, so a moved-from view's
     //     stale index is read through the guard. It never writes the index over an empty table:
     //     owning_message_handle::view() returns one shared empty view on every thread.

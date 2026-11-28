@@ -485,6 +485,31 @@ TEST(WireUnknownFieldsFirstUnknownIndexDeathTest, MovedFromSourceWithTheIndexUns
     moved_from_arm(/*set_index_before_the_move=*/false);
 }
 
+// (f) The store, detail::remember_first_unknown: an index that fits the uint32 slot is written, and
+// one that does not (the sentinel, and indices past 2^32 that a cast would wrap) leaves the slot
+// as it was. The slot starts at a value no case stores, so a store that skipped the check shows,
+// and each index is read through a volatile, so the check runs at run time.
+std::uint32_t store_first_unknown(std::size_t idx) {
+    constexpr std::uint32_t kSeed = 37;
+    std::uint32_t slot = kSeed;
+    std::size_t volatile runtime_idx = idx;
+    fixpp::wire::detail::remember_first_unknown(slot, runtime_idx);
+    return slot;
+}
+
+TEST(WireUnknownFieldsFirstUnknownIndex, StoreWritesOnlyAnIndexThatFits) {
+    using fixpp::wire::detail::kFirstUnknownNotComputed;
+    constexpr std::uint32_t kSeed = 37;
+    EXPECT_EQ(store_first_unknown(kFirstUnknownNotComputed), kSeed) << "the sentinel was stored";
+    EXPECT_EQ(store_first_unknown(kFirstUnknownNotComputed - 1U), kFirstUnknownNotComputed - 1U);
+    EXPECT_EQ(store_first_unknown(0), 0U);
+    if constexpr (sizeof(std::size_t) > sizeof(std::uint32_t)) {
+        auto const two_to_32 = static_cast<std::size_t>(std::uint64_t{1} << 32U);
+        EXPECT_EQ(store_first_unknown(two_to_32), kSeed) << "2^32 was stored (it wraps to 0)";
+        EXPECT_EQ(store_first_unknown(two_to_32 + 5U), kSeed) << "2^32 + 5 was stored (wraps to 5)";
+    }
+}
+
 // ── Q-32 (093-inbound-frame-dispositions, FR-015, fixpp#540; W1 D-688-1, fixpp#688) ─────────
 //
 // The parse resource here is a monotonic buffer over a heap block, its upstream set explicitly to
